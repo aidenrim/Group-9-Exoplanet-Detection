@@ -1,8 +1,10 @@
 Group 9 Exoplanet Detection
+
 Members: Ayush Adhikari, Nikhil Khot, Arha Yalamanchili, Aiden Rim 
 
 
 AI Technique/Method used: Resnet 18
+
 Data from: MAST Queries from Astroquery
 
 Exoplanet detection is an ongoing problem within the field of astronomy. Exoplanets are planets not located within our solar system - most commonly orbiting another star. They are among the top candidates for finding life outside of Earth, motivating their study. Beyond that, each confirmed exoplanet challenges and/or strengthens our knowledge of planetary formation as the unique properties of each star system / exoplanet(s) pair often greatly vary from the few planets we have been able to directly image within our own system. 
