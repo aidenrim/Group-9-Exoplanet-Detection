@@ -1,0 +1,30 @@
+[project]
+name = "exoplanet-detection-group9"
+version = "0.1.0"
+description = "End-to-end exoplanet detection and characterization baseline using Kepler/TESS light curves."
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "astroquery>=0.4.9",
+  "joblib>=1.4.2",
+  "lightkurve>=2.5.1",
+  "numpy==2.2.6",
+  "opencv-python==4.12.0.88",
+  "pandas==2.3.3",
+  "scikit-learn>=1.7.0",
+  "scipy>=1.16.0",
+  "torch==2.9.1",
+]
+
+[build-system]
+requires = ["setuptools==80.9.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+package = true

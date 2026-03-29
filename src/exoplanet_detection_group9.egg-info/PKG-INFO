@@ -1,3 +1,19 @@
+Metadata-Version: 2.4
+Name: exoplanet-detection-group9
+Version: 0.1.0
+Summary: End-to-end exoplanet detection and characterization baseline using Kepler/TESS light curves.
+Requires-Python: <3.15,>=3.14
+Description-Content-Type: text/markdown
+Requires-Dist: astroquery>=0.4.9
+Requires-Dist: joblib>=1.4.2
+Requires-Dist: lightkurve>=2.5.1
+Requires-Dist: numpy==2.2.6
+Requires-Dist: opencv-python==4.12.0.88
+Requires-Dist: pandas==2.3.3
+Requires-Dist: scikit-learn>=1.6.1
+Requires-Dist: scipy>=1.15.2
+Requires-Dist: torch==2.9.1
+
 Group 9 Exoplanet Detection
 ===========================
 
@@ -73,14 +89,12 @@ $env:UV_CACHE_DIR = "$PWD\\.uv-cache"
 uv run python scripts/curate_dataset.py --input data/synthetic_raw.csv --output data/curated_light_curves.csv
 ```
 
-3. Train classifier only (recommended while modeling):
+3. Train classifier + regressors:
 
 ```powershell
 $env:UV_CACHE_DIR = "$PWD\\.uv-cache"
-uv run python scripts/train.py --dataset data/curated_light_curves.csv --output-dir artifacts --epochs 20 --classification-only
+uv run python scripts/train.py --dataset data/curated_light_curves.csv --output-dir artifacts --epochs 20
 ```
-
-To train full pipeline later (classification + regression), remove `--classification-only`.
 
 4. Predict from curated CSV sample or from MAST target:
 
@@ -97,7 +111,6 @@ uv run python scripts/predict.py --target-id "TIC 25155310" --mission TESS
 $env:UV_CACHE_DIR = "$PWD\\.uv-cache"
 uv run python scripts/backend_workflow.py --n-samples 600 --epochs 20
 ```
-By default, this runs in classification-only mode. Use `--full` to include regression.
 
 Training Data Format
 --------------------

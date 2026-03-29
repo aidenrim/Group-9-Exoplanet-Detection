@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/ayush/Group-9-Exoplanet-Detection -type f -name *.md -o -name *.txt -o -name *.toml -o -name *.yaml -o -name *.yml)"
+    ]
+  }
+}
