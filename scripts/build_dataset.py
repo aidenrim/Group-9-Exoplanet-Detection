@@ -1,4 +1,4 @@
-from dataset_builder import build_dataset
+from src.dataset_builder import build_dataset
 
 planet_targets = [
     "Kepler-10",
