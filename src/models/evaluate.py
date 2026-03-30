@@ -3,9 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 import seaborn as sns
+from pathlib import Path
 
 
-def evaluate_model(model, dataloader):
+def evaluate_model(model, dataloader, model_name="default"):
+
+    results_dir = Path("results")
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     model.eval()
 
@@ -43,7 +47,7 @@ def evaluate_model(model, dataloader):
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
     plt.title("Confusion Matrix")
-    plt.savefig("../results/confusion_matrix.png")
+    plt.savefig(results_dir / f"{model_name}_confusion_matrix.png")
     plt.close()
 
     return {

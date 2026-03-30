@@ -1,0 +1,5 @@
+.vscode/settings.json
+src/__pycache__/
+.ds_store
+data/processed/*.npy
+__pycache__
