@@ -1,5 +1,5 @@
 from torch.utils.data import DataLoader, random_split
-from src.dataset import ExoplanetDataset
+from dataset import ExoplanetDataset
 
 
 def get_dataloaders(X_path, y_path, batch_size=32):
