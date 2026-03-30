@@ -15,10 +15,6 @@ non_planet_targets = [
     "Kepler-21"
 ]
 
-script_path = Path(__file__).resolve()
-project_root = script_path.parent.parent
-output_path = project_root / "data" / "processed"
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process some inputs.")
 
@@ -44,5 +40,4 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    filepath = output_path / args.dataset_name
-    build_dataset(args.planet_targets, args.non_planet_targets, filepath)
+    build_dataset(args.planet_targets, args.non_planet_targets, args.dataset_name)

@@ -9,9 +9,9 @@ from pathlib import Path
 import sys
 # Ensure project root is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from model import ResNet18_1D
+from src.models.model import ResNet18_1D
 from src.data.ExoplanetDataset import get_dataloaders
-from evaluate import evaluate_model
+from src.models.evaluate import evaluate_model
 
 
 # -------------------------
