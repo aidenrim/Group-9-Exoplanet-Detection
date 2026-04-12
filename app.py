@@ -10,14 +10,21 @@ from src.models.regression import estimate_period_bls
 from src.data.dataset_builder import get_segments
 from lightkurve import search_lightcurve
 
+# Used Claude code to write the streamlit frontend.
+# Allows user to input a Kepler or TESS star ID, runs the prediction pipeline, and displays results including:
+# - Overall classification (exoplanet candidate or not)
+# - Confidence score
+# - Estimated orbital period (if candidate)
+# - Plots of the light curve and per-segment probabilities
+
+
+
 st.set_page_config(page_title="Exoplanet Detection", layout="centered")
 
 st.title("Exoplanet Detection")
 st.write("Enter a Kepler or TESS star ID to classify it as an exoplanet candidate.")
 
-# -------------------------
 # Sidebar: model selection
-# -------------------------
 models_dir = Path("models")
 available_models = [p.stem for p in models_dir.glob("*.pt")] if models_dir.exists() else []
 
@@ -28,9 +35,7 @@ if not available_models:
 model_name = st.sidebar.selectbox("Model", available_models, index=0)
 threshold = st.sidebar.slider("Confidence threshold", 0.0, 1.0, 0.5, 0.01)
 
-# -------------------------
 # Input
-# -------------------------
 target = st.text_input(
     "Star ID",
     placeholder="e.g. Kepler-442, TIC 260647166"
@@ -44,9 +49,7 @@ if st.button("Run Detection") and target.strip():
             st.error(f"Failed to process target: {e}")
             st.stop()
 
-    # -------------------------
     # Result banner
-    # -------------------------
     label = "Exoplanet Candidate" if result["prediction"] == 1 else "Not an Exoplanet"
     color = "green" if result["prediction"] == 1 else "red"
     st.markdown(f"### Result: :{color}[{label}]")
@@ -68,9 +71,7 @@ if st.button("Run Detection") and target.strip():
             except Exception:
                 pass
 
-    # -------------------------
     # Light curve plot
-    # -------------------------
     with st.spinner("Plotting light curve..."):
         try:
             mission = "Kepler" if "Kepler" in target else "TESS"
@@ -88,9 +89,7 @@ if st.button("Run Detection") and target.strip():
         except Exception:
             st.info("Could not plot light curve (data may already be cached from prediction).")
 
-    # -------------------------
     # Segment-level probabilities
-    # -------------------------
     with st.spinner("Computing per-segment probabilities..."):
         try:
             import torch
