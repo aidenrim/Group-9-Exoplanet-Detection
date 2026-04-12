@@ -10,9 +10,10 @@ planet_targets = [
     "Kepler-22"
 ]
 
+# Stars confirmed to have NO exoplanets (do not use Kepler-20/21 — they have confirmed planets)
 non_planet_targets = [
-    "Kepler-20",
-    "Kepler-21"
+    "KIC 3733346",
+    "KIC 4914423"
 ]
 
 if __name__ == "__main__":

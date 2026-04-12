@@ -14,17 +14,13 @@ from src.data.ExoplanetDataset import get_dataloaders
 from src.models.evaluate import evaluate_model
 
 
-# -------------------------
 # Config
-# -------------------------
-EPOCHS = 1
+EPOCHS = 30
 LR = 1e-3
 
 
-# -------------------------
 # Training Function
-# -------------------------
-def train(dataset_name="default", model_name="default"):
+def train(dataset_name="default", model_name="default", epochs=EPOCHS):
 
     models_dir = Path("models")
     results_dir = Path("results")
@@ -48,10 +44,8 @@ def train(dataset_name="default", model_name="default"):
     train_losses = []
     val_losses = []
 
-    # -------------------------
     # Training Loop
-    # -------------------------
-    for epoch in tqdm(range(EPOCHS)):
+    for epoch in tqdm(range(epochs)):
 
         model.train()
         running_loss = 0.0
@@ -71,9 +65,7 @@ def train(dataset_name="default", model_name="default"):
         avg_train_loss = running_loss / len(train_loader)
         train_losses.append(avg_train_loss)
 
-        # -------------------------
         # Validation
-        # -------------------------
         model.eval()
         val_loss = 0.0
 
@@ -89,17 +81,13 @@ def train(dataset_name="default", model_name="default"):
         avg_val_loss = val_loss / len(val_loader)
         val_losses.append(avg_val_loss)
 
-        print(f"Epoch {epoch+1}/{EPOCHS} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        print(f"Epoch {epoch+1}/{epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
-    # -------------------------
     # Save Model
-    # -------------------------
     torch.save(model.state_dict(), models_dir / f"{model_name}.pt")
     print(f"Model saved to {models_dir / f'{model_name}.pt'}")
 
-    # -------------------------
     # Plot Loss Curves
-    # -------------------------
     plt.figure()
     plt.plot(train_losses, label="Train Loss")
     plt.plot(val_losses, label="Val Loss")
@@ -110,9 +98,7 @@ def train(dataset_name="default", model_name="default"):
     plt.savefig(results_dir / f"{model_name}_loss_curve.png")
     plt.close()
 
-    # -------------------------
     # Evaluate on Test Set
-    # -------------------------
     metrics = evaluate_model(model, test_loader)
 
     # Save metrics

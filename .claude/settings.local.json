@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/ayush/Group-9-Exoplanet-Detection/data -type f -exec ls -lh {} \\\\;)",
+      "Bash(du -sh /Users/ayush/Group-9-Exoplanet-Detection/*)",
+      "Bash(xargs ls:*)",
+      "Bash(git -C /Users/ayush/Group-9-Exoplanet-Detection log --oneline -20)"
+    ]
+  }
+}
