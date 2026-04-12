@@ -1,109 +1,232 @@
-# src/model.py
+"""
+Phase 3: Model
+==============
+
+Dual-branch 1D CNN for Kepler planet-candidate classification.
+
+Architecture overview
+---------------------
+
+    Global view (201,) ──► Branch G ──► flatten (1 600,) ──┐
+                                                            ├──► head ──► logit (1,)
+    Local  view  (61,) ──► Branch L ──►  flatten  (480,) ──┘
+
+Each branch is a stack of Conv1d → BatchNorm1d → ReLU → MaxPool1d blocks.
+The two flattened feature vectors are concatenated and passed through a small
+fully-connected classifier.
+
+Why two branches?
+-----------------
+The global view (201 bins across the full phase range) gives the network
+context: how noisy is this lightcurve?  Is there a secondary eclipse at
+phase ±0.5 that would flag an eclipsing binary?  Are there ellipsoidal
+brightness variations indicating a stellar companion?
+
+The local view (61 bins zoomed into ±2 transit durations) gives fine
+morphology: is the transit flat-bottomed (planet limb darkening profile)
+or V-shaped (grazing eclipsing binary)?  Is ingress/egress symmetric?
+
+A single branch over the full phase range would require extremely narrow
+convolutional kernels to resolve transit shape, while losing sensitivity
+to the broader contextual signals.  Two branches with different effective
+resolutions handle both scales cleanly — the same motivation behind the
+AstroNet architecture (Shallue & Vanderburg 2018).
+
+Why BatchNorm?
+--------------
+BatchNorm normalises the distribution of each feature map across the batch
+after every convolution.  This prevents the "internal covariate shift"
+problem where changing weights in early layers shift the input distribution
+seen by later layers, forcing them to constantly re-adapt.  Practically,
+BatchNorm allows training with higher learning rates and makes the network
+less sensitive to weight initialisation.
+
+Why raw logits (no sigmoid in forward)?
+----------------------------------------
+BCEWithLogitsLoss fuses the sigmoid and the binary cross-entropy into a
+single numerically-stable operation using the log-sum-exp trick.  Calling
+sigmoid() explicitly in the model and then using BCELoss is equivalent but
+more prone to vanishing gradients near 0 and 1.  Probability predictions
+at inference time use .predict_proba(), which applies sigmoid explicitly.
+
+Dynamic flattened-size computation
+-----------------------------------
+Rather than hardcoding the flattened sizes (1 600 and 480), __init__ runs
+a dummy tensor of the correct length through each branch and measures the
+output.  This means the model still assembles correctly if GLOBAL_BINS or
+LOCAL_BINS in preprocess.py are ever changed.
+"""
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
-# -------------------------
-# Residual Block (1D)
-# -------------------------
-class BasicBlock1D(nn.Module):
-    expansion = 1
+# ---------------------------------------------------------------------------
+# Building block
+# ---------------------------------------------------------------------------
 
-    def __init__(self, in_channels, out_channels, stride=1):
+
+class ConvBlock(nn.Module):
+    """
+    Conv1d → BatchNorm1d → ReLU → MaxPool1d.
+
+    Uses 'same' padding (padding = kernel_size // 2) so the convolution
+    does not shrink the sequence length; all length reduction comes from
+    MaxPool1d, making the size arithmetic easy to reason about.
+
+    Args:
+        in_channels:  Number of input feature maps.
+        out_channels: Number of output feature maps (filter count).
+        kernel_size:  Convolutional kernel width (default 5).
+        pool_size:    MaxPool stride/kernel (default 2, halves sequence length).
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int = 5,
+        pool_size: int = 2,
+    ) -> None:
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv1d(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                padding=kernel_size // 2,   # 'same' padding
+            ),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(kernel_size=pool_size),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.block(x)
+
+
+# ---------------------------------------------------------------------------
+# Full model
+# ---------------------------------------------------------------------------
+
+
+class ExoplanetCNN(nn.Module):
+    """
+    Dual-branch 1D CNN for exoplanet transit classification.
+
+    Input
+    -----
+    global_view : (batch, global_len)   phase-folded, baseline-centred
+    local_view  : (batch,  local_len)   zoomed transit region
+
+    Output
+    ------
+    logits : (batch, 1)   raw un-activated scores.
+             Apply torch.sigmoid() to obtain probabilities, or pass directly
+             to BCEWithLogitsLoss during training.
+
+    Args:
+        global_len:  Length of the global-view input (must match GLOBAL_BINS
+                     in preprocess.py, default 201).
+        local_len:   Length of the local-view input (must match LOCAL_BINS
+                     in preprocess.py, default 61).
+        dropout:     Dropout probability in the classifier head (default 0.5).
+                     Dropout is the primary regularisation mechanism; it
+                     randomly zeroes half the activations each forward pass
+                     during training, forcing the network to not rely on any
+                     single feature.
+    """
+
+    def __init__(
+        self,
+        global_len: int = 201,
+        local_len: int = 61,
+        dropout: float = 0.5,
+    ) -> None:
         super().__init__()
 
-        self.conv1 = nn.Conv1d(
-            in_channels, out_channels,
-            kernel_size=3, stride=stride, padding=1, bias=False
+        # ------------------------------------------------------------------
+        # Global branch  (3 conv blocks)
+        #
+        # Input length 201 evolves as:
+        #   After block 1: floor(201 / 2) = 100   (channels: 1  → 16)
+        #   After block 2: floor(100 / 2) =  50   (channels: 16 → 32)
+        #   After block 3: floor( 50 / 2) =  25   (channels: 32 → 64)
+        #   Flatten: 64 × 25 = 1 600
+        # ------------------------------------------------------------------
+        self.global_branch = nn.Sequential(
+            ConvBlock(1,  16),
+            ConvBlock(16, 32),
+            ConvBlock(32, 64),
         )
-        self.bn1 = nn.BatchNorm1d(out_channels)
 
-        self.conv2 = nn.Conv1d(
-            out_channels, out_channels,
-            kernel_size=3, stride=1, padding=1, bias=False
+        # ------------------------------------------------------------------
+        # Local branch  (2 conv blocks)
+        #
+        # Input length 61 evolves as:
+        #   After block 1: floor(61 / 2) = 30   (channels: 1  → 16)
+        #   After block 2: floor(30 / 2) = 15   (channels: 16 → 32)
+        #   Flatten: 32 × 15 = 480
+        # ------------------------------------------------------------------
+        self.local_branch = nn.Sequential(
+            ConvBlock(1,  16),
+            ConvBlock(16, 32),
         )
-        self.bn2 = nn.BatchNorm1d(out_channels)
 
-        self.shortcut = nn.Sequential()
+        # ------------------------------------------------------------------
+        # Dynamically compute the flattened sizes.
+        # ------------------------------------------------------------------
+        with torch.no_grad():
+            dummy_g = torch.zeros(1, 1, global_len)
+            dummy_l = torch.zeros(1, 1, local_len)
+            g_flat = self.global_branch(dummy_g).flatten(1).shape[1]
+            l_flat = self.local_branch(dummy_l).flatten(1).shape[1]
 
-        # Match dimensions if needed
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv1d(
-                    in_channels, out_channels,
-                    kernel_size=1, stride=stride, bias=False
-                ),
-                nn.BatchNorm1d(out_channels)
-            )
+        combined_size = g_flat + l_flat   # 1 600 + 480 = 2 080 by default
 
-    def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += self.shortcut(x)
-        out = F.relu(out)
-        return out
-
-
-# -------------------------
-# ResNet-18 (1D version)
-# -------------------------
-class ResNet1D(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=1):
-        super().__init__()
-
-        self.in_channels = 64
-
-        # Initial layer
-        self.conv1 = nn.Conv1d(
-            1, 64, kernel_size=7, stride=2, padding=3, bias=False
+        # ------------------------------------------------------------------
+        # Classifier head
+        # ------------------------------------------------------------------
+        self.head = nn.Sequential(
+            nn.Linear(combined_size, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=dropout),
+            nn.Linear(512, 1),          # raw logit; no sigmoid here
         )
-        self.bn1 = nn.BatchNorm1d(64)
-        self.pool = nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
 
-        # Residual layers
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
+    def forward(
+        self,
+        global_view: torch.Tensor,
+        local_view: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            global_view: (batch, global_len)
+            local_view:  (batch,  local_len)
 
-        # Global pooling + classifier
-        self.global_pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        Returns:
+            logits: (batch, 1)
+        """
+        # unsqueeze(1) adds the channel dimension: (B, L) → (B, 1, L)
+        g = self.global_branch(global_view.unsqueeze(1))   # (B, 64, 25)
+        l = self.local_branch(local_view.unsqueeze(1))     # (B, 32, 15)
 
-    def _make_layer(self, block, out_channels, num_blocks, stride):
-        layers = []
+        # Flatten spatial dimension: (B, C, L) → (B, C*L)
+        g = g.flatten(1)    # (B, 1 600)
+        l = l.flatten(1)    # (B,   480)
 
-        layers.append(block(self.in_channels, out_channels, stride))
-        self.in_channels = out_channels
+        combined = torch.cat([g, l], dim=1)   # (B, 2 080)
+        return self.head(combined)             # (B, 1)
 
-        for _ in range(1, num_blocks):
-            layers.append(block(self.in_channels, out_channels))
+    def predict_proba(
+        self,
+        global_view: torch.Tensor,
+        local_view: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Return calibrated probabilities in [0, 1].
 
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        # Input: (B, 1, 1024)
-
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.pool(out)
-
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-
-        out = self.global_pool(out)  # (B, 512, 1)
-        out = out.view(out.size(0), -1)  # (B, 512)
-
-        out = self.fc(out)  # (B, 1)
-
-        return out
-
-
-# -------------------------
-# Factory Function
-# -------------------------
-def ResNet18_1D():
-    return ResNet1D(BasicBlock1D, [2, 2, 2, 2])
+        Convenience wrapper around forward() + sigmoid for inference.
+        Not used during training (BCEWithLogitsLoss applies sigmoid internally).
+        """
+        return torch.sigmoid(self.forward(global_view, local_view))
