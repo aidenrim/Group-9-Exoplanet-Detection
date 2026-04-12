@@ -1,112 +1,134 @@
-import streamlit as st
+import math
+import sys
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
-import sys
+import pandas as pd
+import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from src.models.predict import predict_target, load_model
-from src.models.regression import estimate_period_bls
-from src.data.dataset_builder import get_segments
-from lightkurve import search_lightcurve
 
-# Used Claude code to write the streamlit frontend.
-# Allows user to input a Kepler or TESS star ID, runs the prediction pipeline, and displays results including:
-# - Overall classification (exoplanet candidate or not)
-# - Confidence score
-# - Estimated orbital period (if candidate)
-# - Plots of the light curve and per-segment probabilities
+from src.models.predict import load_model, predict_koi
 
+ROOT         = Path(__file__).resolve().parent
+CATALOG_FILE = ROOT / "data" / "catalogs" / "koi_cumulative.csv"
+RESULTS_DIR  = ROOT / "results"
 
+# ---------------------------------------------------------------------------
+# Page config
+# ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Exoplanet Detection", layout="centered")
+st.set_page_config(page_title="Exoplanet CNN Classifier", layout="centered")
+st.title("Exoplanet CNN Classifier")
+st.write(
+    "Enter a KOI name to classify it as a planet candidate or false positive "
+    "using the trained dual-branch lightcurve CNN."
+)
 
-st.title("Exoplanet Detection")
-st.write("Enter a Kepler or TESS star ID to classify it as an exoplanet candidate.")
+# ---------------------------------------------------------------------------
+# Sidebar — model selection and threshold
+# ---------------------------------------------------------------------------
 
-# Sidebar: model selection
-models_dir = Path("models")
-available_models = [p.stem for p in models_dir.glob("*.pt")] if models_dir.exists() else []
+available_models = sorted([
+    p.name for p in RESULTS_DIR.iterdir()
+    if p.is_dir() and (p / "best_model.pt").exists()
+]) if RESULTS_DIR.exists() else []
 
 if not available_models:
-    st.error("No trained models found in the `models/` directory. Train a model first.")
+    st.error("No trained models found in results/. Run scripts/train.py first.")
     st.stop()
 
 model_name = st.sidebar.selectbox("Model", available_models, index=0)
-threshold = st.sidebar.slider("Confidence threshold", 0.0, 1.0, 0.5, 0.01)
 
-# Input
-target = st.text_input(
-    "Star ID",
-    placeholder="e.g. Kepler-442, TIC 260647166"
+# Load checkpoint metadata to populate the threshold slider default.
+_, meta = load_model(RESULTS_DIR / model_name / "best_model.pt")
+
+threshold = st.sidebar.slider(
+    "Confidence threshold", 0.0, 1.0, float(meta["threshold"]), 0.01
+)
+st.sidebar.caption(
+    f"Epoch {meta['epoch']} · val AUC {meta['val_auc']:.4f}"
 )
 
-if st.button("Run Detection") and target.strip():
-    with st.spinner("Downloading and processing light curve..."):
+# ---------------------------------------------------------------------------
+# Main — KOI input and classification
+# ---------------------------------------------------------------------------
+
+kepoi_name = st.text_input("KOI Name", placeholder="e.g. K00010.01, K00113.01")
+
+if st.button("Run Classification") and kepoi_name.strip():
+    with st.spinner("Running classification..."):
         try:
-            result = predict_target(model_name, target.strip(), threshold=threshold)
-        except Exception as e:
-            st.error(f"Failed to process target: {e}")
+            result = predict_koi(model_name, kepoi_name.strip(), threshold=threshold)
+        except KeyError as exc:
+            st.error(str(exc))
+            st.stop()
+        except FileNotFoundError as exc:
+            st.error(str(exc))
+            st.stop()
+        except Exception as exc:
+            st.error(f"Prediction failed: {exc}")
             st.stop()
 
-    # Result banner
-    label = "Exoplanet Candidate" if result["prediction"] == 1 else "Not an Exoplanet"
-    color = "green" if result["prediction"] == 1 else "red"
+    # --- result banner ----------------------------------------------------
+    label = "Planet Candidate" if result["prediction"] == 1 else "False Positive"
+    color = "green"            if result["prediction"] == 1 else "red"
     st.markdown(f"### Result: :{color}[{label}]")
 
-    col1, col2 = st.columns(2)
-    col1.metric("Confidence", f"{result['confidence']:.1%}")
-    col2.metric("Segments analysed", result["num_segments"])
+    # --- metrics row ------------------------------------------------------
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Confidence",  f"{result['confidence']:.1%}")
+    col2.metric("Probability", f"{result['probability']:.4f}")
+    col3.metric("Threshold",   f"{result['threshold']:.2f}")
 
-    # Orbital period estimate (BLS)
-    if result["prediction"] == 1:
-        with st.spinner("Estimating orbital period via BLS periodogram..."):
-            try:
-                mission = "Kepler" if "Kepler" in target else "TESS"
-                sr = search_lightcurve(target.strip(), mission=mission)
-                lc_raw = sr.download_all().stitch().remove_nans().flatten()
-                period = estimate_period_bls(lc_raw)
-                if period is not None:
-                    st.metric("Estimated orbital period", f"{period:.2f} days")
-            except Exception:
-                pass
+    # --- known disposition ------------------------------------------------
+    known_map = {1: "CONFIRMED / CANDIDATE", 0: "FALSE POSITIVE"}
+    known_str = known_map.get(result["known_label"], "UNKNOWN")
+    st.caption(
+        f"Known disposition: **{result['koi_disposition']}** ({known_str}) "
+        f"· Kepler ID: {result['kepid']}"
+    )
 
-    # Light curve plot
-    with st.spinner("Plotting light curve..."):
-        try:
-            mission = "Kepler" if "Kepler" in target else "TESS"
-            search_result = search_lightcurve(target.strip(), mission=mission)
-            lc_collection = search_result.download_all()
-            lc = lc_collection.stitch().remove_nans().flatten()
+    # --- orbital period from catalog -------------------------------------
+    try:
+        catalog = pd.read_csv(CATALOG_FILE)
+        cat_matches = catalog[catalog["kepoi_name"] == kepoi_name.strip()]
+        if not cat_matches.empty:
+            cat_row = cat_matches.iloc[0]
+            period   = cat_row["koi_period"]
+            duration = cat_row["koi_duration"]
+            p_col, d_col = st.columns(2)
+            if not math.isnan(period):
+                p_col.metric("Orbital period",   f"{period:.4f} days")
+            if not math.isnan(duration):
+                d_col.metric("Transit duration", f"{duration:.2f} hours")
+    except Exception:
+        pass
 
-            fig, ax = plt.subplots(figsize=(10, 3))
-            ax.plot(lc.time.value, lc.flux.value, lw=0.5, color="steelblue")
-            ax.set_xlabel("Time (BTJD days)")
-            ax.set_ylabel("Normalised Flux")
-            ax.set_title(f"Light curve — {target.strip()}")
-            st.pyplot(fig)
-            plt.close(fig)
-        except Exception:
-            st.info("Could not plot light curve (data may already be cached from prediction).")
+    # --- lightcurve plots -------------------------------------------------
+    st.subheader("Phase-folded lightcurve views")
 
-    # Segment-level probabilities
-    with st.spinner("Computing per-segment probabilities..."):
-        try:
-            import torch
-            segments = get_segments(target.strip())
-            model = load_model(Path("models") / f"{model_name}.pt")
-            X = torch.tensor(segments, dtype=torch.float32).unsqueeze(1)
-            with torch.no_grad():
-                probs = torch.sigmoid(model(X)).squeeze().numpy()
+    # Global view — full orbital phase
+    fig1, ax1 = plt.subplots(figsize=(10, 3))
+    phase_bins = np.linspace(-0.5, 0.5, len(result["global_view"]))
+    ax1.plot(phase_bins, result["global_view"], lw=1.0, color="steelblue")
+    ax1.axhline(0, color="gray", linestyle="--", lw=0.5, alpha=0.5)
+    ax1.set_xlabel("Orbital phase")
+    ax1.set_ylabel("Relative flux (baseline = 0)")
+    ax1.set_title(f"Global view — {kepoi_name.strip()}  (201 phase bins)")
+    ax1.grid(True, alpha=0.3)
+    st.pyplot(fig1)
+    plt.close(fig1)
 
-            fig2, ax2 = plt.subplots(figsize=(10, 3))
-            ax2.bar(range(len(probs)), probs, color="steelblue", alpha=0.7)
-            ax2.axhline(threshold, color="red", linestyle="--", label=f"Threshold ({threshold:.2f})")
-            ax2.set_xlabel("Segment index")
-            ax2.set_ylabel("Exoplanet probability")
-            ax2.set_title("Per-segment confidence scores")
-            ax2.legend()
-            st.pyplot(fig2)
-            plt.close(fig2)
-        except Exception:
-            pass
+    # Local view — zoomed transit window
+    fig2, ax2 = plt.subplots(figsize=(10, 3))
+    local_bins = np.linspace(-1, 1, len(result["local_view"]))
+    ax2.plot(local_bins, result["local_view"], lw=1.0, color="darkorange")
+    ax2.axhline(0, color="gray", linestyle="--", lw=0.5, alpha=0.5)
+    ax2.set_xlabel("Phase (transit-centered, ±2 transit durations = ±1)")
+    ax2.set_ylabel("Relative flux")
+    ax2.set_title(f"Local view — {kepoi_name.strip()}  (61 phase bins, transit window)")
+    ax2.grid(True, alpha=0.3)
+    st.pyplot(fig2)
+    plt.close(fig2)
