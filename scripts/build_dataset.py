@@ -93,6 +93,16 @@ def main() -> None:
         default="both",
         help="Filter manifest to one mission before splitting (default: both).",
     )
+    parser.add_argument(
+        "--candidates",
+        choices=["include", "exclude"],
+        default="include",
+        help=(
+            "How to handle CANDIDATE dispositions (label=-1 in manifest). "
+            "'include' remaps them to label 1, treating them as confirmed planets. "
+            "'exclude' drops them entirely (default: include)."
+        ),
+    )
     args = parser.parse_args()
 
     if not MANIFEST_FILE.exists():
@@ -111,9 +121,28 @@ def main() -> None:
         manifest = manifest[manifest["mission"] == target].reset_index(drop=True)
         log.info(f"  Filtered to {target}: {len(manifest)} rows")
 
+    # Migrate old manifests where CANDIDATEs still carry label=1 (written before
+    # the -1 change).  Detection uses the disposition column which is always present.
+    if "disposition" in manifest.columns:
+        old_candidates = (manifest["disposition"] == "CANDIDATE") & (manifest["label"] == 1)
+        if old_candidates.any():
+            manifest = manifest.copy()
+            manifest.loc[old_candidates, "label"] = -1
+            log.info(f"  Migrated {old_candidates.sum()} CANDIDATE rows from label=1 to label=-1")
+
+    # Apply --candidates choice before splitting.
+    n_candidates = int((manifest["label"] == -1).sum())
+    if args.candidates == "exclude":
+        manifest = manifest[manifest["label"] != -1].reset_index(drop=True)
+        log.info(f"  --candidates exclude: removed {n_candidates} candidates, {len(manifest)} rows remain")
+    else:  # include
+        manifest = manifest.copy()
+        manifest.loc[manifest["label"] == -1, "label"] = 1
+        log.info(f"  --candidates include: remapped {n_candidates} candidates to label 1")
+
     log.info(f"Building splits from {MANIFEST_FILE} ...")
     log.info(
-        f"  Name — {args.name}  |  mission: {args.mission}  |  "
+        f"  Name — {args.name}  |  mission: {args.mission}  |  candidates: {args.candidates}  |  "
         f"train: {1 - args.val_frac - args.test_frac:.2f}  "
         f"val: {args.val_frac}  test: {args.test_frac}  "
         f"(random_state={args.random_state})"

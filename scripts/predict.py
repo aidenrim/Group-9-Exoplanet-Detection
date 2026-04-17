@@ -133,8 +133,9 @@ def main() -> None:
     confidence = prob if prediction == "PLANET" else 1.0 - prob
 
     known_label = {
-        1: "CONFIRMED / CANDIDATE",
-        0: "FALSE POSITIVE",
+        1:  "CONFIRMED",
+        0:  "FALSE POSITIVE",
+        -1: "CANDIDATE",
     }.get(int(row["label"]), "UNKNOWN")
 
     # ------------------------------------------------------------------

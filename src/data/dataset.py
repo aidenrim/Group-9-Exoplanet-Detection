@@ -49,7 +49,11 @@ class KOIDataset(Dataset):
 
         global_view : float32 (201,)   full phase-folded, baseline-centred
         local_view  : float32  (61,)   zoomed transit window
-        label       : float32  scalar  1 = planet/candidate, 0 = false positive
+        label       : float32  scalar  read from the manifest (1 = planet,
+                                       0 = false positive; -1 values should
+                                       not appear here — remap or drop them
+                                       in build_dataset.py before constructing
+                                       this dataset)
 
     The label is float32 rather than int so it matches the shape expected by
     BCEWithLogitsLoss without an explicit cast in the training loop.
@@ -78,7 +82,7 @@ class KOIDataset(Dataset):
 
         global_view = torch.from_numpy(data["global_view"]).float()   # (201,)
         local_view  = torch.from_numpy(data["local_view"]).float()    # (61,)
-        label       = torch.tensor(float(data["label"]), dtype=torch.float32)
+        label       = torch.tensor(float(row["label"]), dtype=torch.float32)
 
         return global_view, local_view, label
 

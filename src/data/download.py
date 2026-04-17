@@ -32,6 +32,8 @@ from io import StringIO
 from pathlib import Path
 
 import lightkurve as lk
+import logging as _logging
+_logging.getLogger("lightkurve").setLevel(_logging.ERROR)
 import pandas as pd
 import requests
 

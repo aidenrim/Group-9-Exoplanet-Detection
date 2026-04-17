@@ -41,6 +41,8 @@ import logging
 from pathlib import Path
 
 import lightkurve as lk
+import logging as _logging
+_logging.getLogger("lightkurve").setLevel(_logging.ERROR)
 import numpy as np
 import pandas as pd
 from scipy.stats import binned_statistic
@@ -111,11 +113,11 @@ SIGMA_UPPER = 5.0
 MIN_CADENCES = 500
 
 # Binary classification targets.
-# CANDIDATE is treated as positive: the Kepler pipeline vetted these as
-# astrophysically plausible; most will eventually be confirmed.
+# CANDIDATE is stored as -1 so it can be remapped to 1 or excluded at
+# dataset-build time via scripts/build_dataset.py --candidates include|exclude.
 LABEL_MAP: dict[str, int] = {
-    "CONFIRMED": 1,
-    "CANDIDATE": 1,
+    "CONFIRMED":     1,
+    "CANDIDATE":    -1,
     "FALSE POSITIVE": 0,
 }
 
@@ -592,9 +594,8 @@ def run_preprocessing(
 
     if not manifest_df.empty and "label" in manifest_df.columns:
         dist = manifest_df["label"].value_counts().to_dict()
-        total = len(manifest_df)
         log.info(
-            f"  class dist : {dist.get(1, 0)} planet(s) / {dist.get(0, 0)} false-positive(s)"
-            f"  ({100 * dist.get(1, 0) / total:.1f} % positive)"
+            f"  class dist : {dist.get(1, 0)} planet(s) / {dist.get(0, 0)} false-positive(s) / {dist.get(-1, 0)} candidates"
+            f"  ({100 * dist.get(1, 0) / (dist.get(1, 0) + dist.get(0, 0)):.1f} % positive)"
         )
     log.info("=" * 60)
