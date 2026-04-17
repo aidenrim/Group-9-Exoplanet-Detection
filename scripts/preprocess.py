@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 """
-Preprocess Kepler lightcurves into CNN-ready arrays.
+Preprocess Kepler and/or TESS lightcurves into CNN-ready arrays.
 
 Converts raw stitched lightcurves (from scripts/download.py) into fixed-length,
-normalized arrays ready for CNN input.  Each KOI produces:
+normalized arrays ready for CNN input.  Each candidate produces:
 
     Global view  (201 points) — full phase-folded lightcurve
     Local view   ( 61 points) — zoomed transit window
 
-Pipeline per KOI:
+Pipeline per candidate:
     1. Load stitched FITS lightcurve
     2. Remove NaN cadences
     3. Clip upward flux spikes > 5σ (MAD-based)
-    4. Detrend with 301-cadence Savitzky-Golay filter (~6.3 days)
+    4. Detrend with Savitzky-Golay filter (~6.3 days):
+         Kepler: 301 cadences  (30-min sampling)
+         TESS:   4537 cadences (2-min sampling)
     5. Phase-fold on (period, epoch) from catalog
     6. Bin into global (201) and local (61) views
     7. Subtract 1.0 → baseline = 0; fill empty bins with 0.0
     8. Save as .npz; append row to data/datasets/manifest.csv
 
 Usage:
-    python scripts/preprocess.py                   # process all KOIs
-    python scripts/preprocess.py --max-stars 50    # smoke-test on 50 stars
-    python scripts/preprocess.py --force           # reprocess already-done KOIs
+    python scripts/preprocess.py                       # Kepler (default)
+    python scripts/preprocess.py --mission tess        # TESS only
+    python scripts/preprocess.py --mission both        # both missions
+    python scripts/preprocess.py --max-stars 50        # smoke-test on 50 stars
+    python scripts/preprocess.py --force               # reprocess already-done
 """
 
 import argparse
@@ -32,9 +36,10 @@ from pathlib import Path
 # Add project root to path so src.* imports work regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.data.preprocess import CATALOG_FILE, ROOT, run_preprocessing
-
 import pandas as pd
+
+from src.data.preprocess import CATALOG_FILE, ROOT, run_preprocessing, MISSION_KEPLER, MISSION_TESS
+from src.data.download import TESS_CATALOG_FILE
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -53,7 +58,7 @@ log = logging.getLogger(__name__)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Preprocess KOI lightcurves into CNN-ready arrays.",
+        description="Preprocess Kepler/TESS lightcurves into CNN-ready arrays.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -62,26 +67,47 @@ def main() -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Process only the first N unique stars (for smoke-testing).",
+        help="Process only the first N unique stars per mission (smoke-testing).",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Reprocess KOIs whose .npz output already exists.",
+        help="Reprocess candidates whose .npz output already exists.",
+    )
+    parser.add_argument(
+        "--mission",
+        choices=["kepler", "tess", "both"],
+        default="kepler",
+        help="Which mission to preprocess (default: kepler).",
     )
     args = parser.parse_args()
 
-    if not CATALOG_FILE.exists():
-        log.error(
-            f"Catalog not found: {CATALOG_FILE}\n"
-            "Run Phase 1 first:  python scripts/download.py"
-        )
-        sys.exit(1)
+    do_kepler = args.mission in ("kepler", "both")
+    do_tess   = args.mission in ("tess",   "both")
 
-    catalog = pd.read_csv(CATALOG_FILE)
-    log.info(f"Catalog loaded: {len(catalog)} KOIs.")
+    if do_kepler:
+        if not CATALOG_FILE.exists():
+            log.error(
+                f"Kepler catalog not found: {CATALOG_FILE}\n"
+                "Run first:  python scripts/download.py"
+            )
+            sys.exit(1)
+        catalog = pd.read_csv(CATALOG_FILE)
+        log.info(f"Kepler catalog loaded: {len(catalog)} KOIs.")
+        run_preprocessing(catalog, max_stars=args.max_stars, force=args.force,
+                          mission=MISSION_KEPLER)
 
-    run_preprocessing(catalog, max_stars=args.max_stars, force=args.force)
+    if do_tess:
+        if not TESS_CATALOG_FILE.exists():
+            log.error(
+                f"TESS catalog not found: {TESS_CATALOG_FILE}\n"
+                "Run first:  python scripts/download.py --mission tess"
+            )
+            sys.exit(1)
+        catalog_t = pd.read_csv(TESS_CATALOG_FILE)
+        log.info(f"TESS catalog loaded: {len(catalog_t)} TOIs.")
+        run_preprocessing(catalog_t, max_stars=args.max_stars, force=args.force,
+                          mission=MISSION_TESS)
 
 
 if __name__ == "__main__":

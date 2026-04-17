@@ -96,11 +96,11 @@ def predict_koi(
 
     # --- look up candidate in manifest ------------------------------------
     manifest = pd.read_csv(MANIFEST_FILE)
-    matches = manifest[manifest["kepoi_name"] == kepoi_name]
+    matches = manifest[manifest["name"] == kepoi_name]
     if matches.empty:
         raise KeyError(
             f"Candidate '{kepoi_name}' not found in manifest.\n"
-            f"Example names: {manifest['kepoi_name'].sample(min(5, len(manifest))).tolist()}"
+            f"Example names: {manifest['name'].sample(min(5, len(manifest))).tolist()}"
         )
     row = matches.iloc[0]
 
@@ -126,16 +126,18 @@ def predict_koi(
     confidence = prob if prediction == 1 else 1.0 - prob
 
     return {
-        "probability":     prob,
-        "threshold":       threshold,
-        "prediction":      prediction,
-        "confidence":      confidence,
-        "epoch":           meta["epoch"],
-        "val_auc":         meta["val_auc"],
-        "kepoi_name":      kepoi_name,
-        "kepid":           int(row["kepid"]),
-        "koi_disposition": str(row["koi_disposition"]),
-        "known_label":     int(row["label"]),
-        "global_view":     global_view_np,
-        "local_view":      local_view_np,
+        "probability":  prob,
+        "threshold":    threshold,
+        "prediction":   prediction,
+        "confidence":   confidence,
+        "epoch":        meta["epoch"],
+        "val_auc":      meta["val_auc"],
+        "name":         kepoi_name,
+        "id":           int(row["id"]),
+        "disposition":  str(row["disposition"]),
+        "known_label":  int(row["label"]),
+        "period":       float(row["period"]) if "period" in row and str(row["period"]) != "nan" else float("nan"),
+        "duration":     float(row["duration"]) if "duration" in row and str(row["duration"]) != "nan" else float("nan"),
+        "global_view":  global_view_np,
+        "local_view":   local_view_np,
     }

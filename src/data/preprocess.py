@@ -76,6 +76,32 @@ MAX_LOCAL_HALF_WIDTH = 0.25   # ≤ 25 % of the period on each side
 # (longest KOI transit duration ≈ 15 hours ≈ 30 cadences, well inside one bin).
 SG_WINDOW = 301
 
+# TESS 2-minute cadence: 720 cadences / day.
+# 4537 cadences ≈ 6.3 days — same physical window as Kepler SG_WINDOW.
+# Must be odd. 4537 = 2 * 2268 + 1.
+# Using the Kepler window (301) on TESS data would span only ~10 hours,
+# which is narrower than many transit durations and would distort the signal.
+SG_WINDOW_TESS = 4537
+
+# BTJD conversion: TESS lightcurve times are BTJD = BJD - 2,457,000.
+# The NASA Archive stores pl_tranmid in BJD; we subtract this offset to
+# get BTJD before phase-folding, and store the converted value in the manifest.
+BTJD_OFFSET = 2457000.0
+
+# Mission identifiers written to the manifest.
+MISSION_KEPLER = "KEPLER"
+MISSION_TESS   = "TESS"
+
+# TESS TFOPWG disposition codes → normalized disposition strings.
+_TESS_DISP_MAP: dict[str, str] = {
+    "CP": "CONFIRMED",
+    "KP": "CONFIRMED",
+    "PC": "CANDIDATE",
+    "APC": "CANDIDATE",
+    "FP": "FALSE POSITIVE",
+    "FA": "FALSE POSITIVE",
+}
+
 # Only clip upward outliers.  5σ is aggressive enough to catch cosmic rays
 # while being conservative enough not to clip real astrophysical variability.
 SIGMA_UPPER = 5.0
@@ -101,18 +127,73 @@ log = logging.getLogger(__name__)
 
 
 def _fits_path(kepid: int) -> Path:
-    """Path to the raw stitched lightcurve written by download.py."""
+    """Path to the raw stitched Kepler lightcurve written by download.py."""
     return RAW_DIR / f"kic_{kepid:09d}.fits"
 
 
-def _npz_path(kepoi_name: str) -> Path:
-    """
-    Path for the processed output of one KOI.
+def _tess_fits_path(tic_id: int) -> Path:
+    """Path to the raw stitched TESS lightcurve written by download.py."""
+    return RAW_DIR / f"tic_{tic_id:010d}.fits"
 
-    Dots in KOI names (e.g. 'K00001.01') are replaced with underscores
-    so the filename is safe on all filesystems.
+
+def _npz_path(name: str) -> Path:
     """
-    return PROCESSED_DIR / f"{kepoi_name.replace('.', '_')}.npz"
+    Path for the processed output of one KOI or TOI.
+
+    Dots are replaced with underscores so the filename is safe on all
+    filesystems (e.g. 'K00001.01' → 'K00001_01.npz',
+    'TOI-103.01' → 'TOI-103_01.npz').
+    """
+    return PROCESSED_DIR / f"{name.replace('.', '_')}.npz"
+
+
+# Keep an alias for TESS — both missions use the same naming logic.
+_tess_npz_path = _npz_path
+
+
+# ---------------------------------------------------------------------------
+# Catalog normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_catalog(catalog: pd.DataFrame, mission: str) -> pd.DataFrame:
+    """
+    Return a copy of *catalog* with normalized column names.
+
+    Both missions produce a DataFrame with columns:
+        id          int     Star ID (KIC for Kepler, TIC for TESS)
+        name        str     Candidate name ('K00001.01' or 'TOI-103.01')
+        disposition str     'CONFIRMED', 'CANDIDATE', or 'FALSE POSITIVE'
+        period      float   Orbital period in days
+        time0bk     float   Transit epoch in mission-native time:
+                              Kepler → BKJD (unchanged from koi_time0bk)
+                              TESS   → BTJD = pl_tranmid − 2,457,000
+        duration    float   Transit duration in hours
+
+    Kepler source columns : kepid, kepoi_name, koi_disposition,
+                            koi_period, koi_time0bk, koi_duration
+    TESS source columns   : tid, toi (float), tfopwg_disp,
+                            pl_orbper, pl_tranmid (BJD), pl_trandurh
+    """
+    df = catalog.copy()
+    if mission == MISSION_KEPLER:
+        df = df.rename(columns={
+            "kepid":           "id",
+            "kepoi_name":      "name",
+            "koi_disposition": "disposition",
+            "koi_period":      "period",
+            "koi_time0bk":     "time0bk",
+            "koi_duration":    "duration",
+        })
+    else:  # MISSION_TESS
+        df["id"]          = df["tid"].astype(int)
+        df["name"]        = df["toi"].apply(lambda x: f"TOI-{float(x):.2f}")
+        df["disposition"] = df["tfopwg_disp"].map(_TESS_DISP_MAP)
+        df["period"]      = df["pl_orbper"]
+        df["time0bk"]     = df["pl_tranmid"] - BTJD_OFFSET   # BJD → BTJD
+        df["duration"]    = df["pl_trandurh"]
+
+    return df[["id", "name", "disposition", "period", "time0bk", "duration"]].copy()
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +201,7 @@ def _npz_path(kepoi_name: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _clean_and_detrend(lc: lk.LightCurve) -> lk.LightCurve | None:
+def _clean_and_detrend(lc: lk.LightCurve, sg_window: int = SG_WINDOW) -> lk.LightCurve | None:
     """
     Prepare a raw stitched lightcurve for phase-folding.
 
@@ -176,7 +257,7 @@ def _clean_and_detrend(lc: lk.LightCurve) -> lk.LightCurve | None:
     # ---- Savitzky-Golay detrending -----------------------------------------
     # flatten() requires an odd window length.  Reduce if the lightcurve is
     # shorter than our preferred window (rare but possible for damaged quarters).
-    window = SG_WINDOW
+    window = sg_window
     if window >= len(lc):
         # Round down to nearest odd number less than len(lc).
         window = ((len(lc) - 1) // 2) * 2 + 1
@@ -275,31 +356,41 @@ def _fold_and_bin(
 
 
 def _process_star(
-    kepid: int,
+    star_id: int,
     group: pd.DataFrame,
     force: bool,
+    mission: str = MISSION_KEPLER,
 ) -> tuple[list[dict], dict[str, int]]:
     """
-    Load, clean, and process all KOIs for a single host star.
+    Load, clean, and process all candidates for a single host star.
 
     Loading and detrending are done once; phase-folding is repeated for
-    each KOI (different period/epoch per planet on the same star).
+    each candidate (different period/epoch per planet on the same star).
+
+    Args:
+        star_id: Star identifier (KIC ID for Kepler, TIC ID for TESS).
+        group:   Normalized catalog rows for this star (columns: id, name,
+                 disposition, period, time0bk, duration).
+        force:   If True, reprocess candidates whose .npz already exists.
+        mission: MISSION_KEPLER or MISSION_TESS.
 
     Returns:
-        results: list of dicts, one per successfully processed KOI.
-                 Each dict has keys: kepoi_name, kepid, koi_disposition,
-                 label, global_view, local_view.
+        results: list of dicts, one per successfully processed candidate.
         counts:  tally of outcomes for progress reporting.
     """
     counts = {"ok": 0, "no_file": 0, "short": 0, "error": 0}
     results: list[dict] = []
 
+    # Select mission-specific helpers.
+    fits_path_fn = _tess_fits_path if mission == MISSION_TESS else _fits_path
+    sg_window    = SG_WINDOW_TESS  if mission == MISSION_TESS else SG_WINDOW
+
     # ------------------------------------------------------------------
-    # Filter KOIs that are already processed (unless --force).
+    # Filter candidates that are already processed (unless --force).
     # ------------------------------------------------------------------
     if not force:
         pending = group[
-            ~group["kepoi_name"].apply(lambda n: _npz_path(n).exists())
+            ~group["name"].apply(lambda n: _npz_path(n).exists())
         ]
         already_done = len(group) - len(pending)
         if already_done:
@@ -310,44 +401,47 @@ def _process_star(
         return results, counts
 
     # ------------------------------------------------------------------
-    # Load and detrend the lightcurve (once for all KOIs on this star).
+    # Load and detrend the lightcurve (once for all candidates on this star).
     # ------------------------------------------------------------------
-    fits_path = _fits_path(kepid)
+    fits_path = fits_path_fn(star_id)
     if not fits_path.exists():
+        log.warning("No file for ")
+        log.warning(fits_path)
         counts["no_file"] += len(group)
         return results, counts
 
+    id_label = "TIC" if mission == MISSION_TESS else "KIC"
     try:
         lc = lk.read(str(fits_path))
-        flat_lc = _clean_and_detrend(lc)
+        flat_lc = _clean_and_detrend(lc, sg_window=sg_window)
     except Exception as exc:
-        log.warning(f"KIC {kepid}: load/detrend failed — {exc}")
+        log.warning(f"{id_label} {star_id}: load/detrend failed — {exc}")
         counts["error"] += len(group)
         return results, counts
 
     if flat_lc is None:
-        log.debug(f"KIC {kepid}: too short after cleaning, skipping {len(group)} KOI(s).")
+        log.debug(f"{id_label} {star_id}: too short after cleaning, skipping {len(group)} candidate(s).")
         counts["short"] += len(group)
         return results, counts
 
     # ------------------------------------------------------------------
-    # Phase-fold and bin for each KOI on this star.
+    # Phase-fold and bin for each candidate on this star.
     # ------------------------------------------------------------------
     for _, row in group.iterrows():
         try:
             views = _fold_and_bin(
                 flat_lc,
-                period=float(row["koi_period"]),
-                epoch=float(row["koi_time0bk"]),
-                transit_duration_hours=float(row["koi_duration"]),
+                period=float(row["period"]),
+                epoch=float(row["time0bk"]),   # already in mission-native time
+                transit_duration_hours=float(row["duration"]),
             )
         except Exception as exc:
-            log.debug(f"  KOI {row['kepoi_name']}: fold/bin error — {exc}")
+            log.debug(f"  {row['name']}: fold/bin error — {exc}")
             counts["error"] += 1
             continue
 
         if views is None:
-            log.debug(f"  KOI {row['kepoi_name']}: too few points after fold.")
+            log.debug(f"  {row['name']}: too few points after fold.")
             counts["short"] += 1
             continue
 
@@ -355,12 +449,16 @@ def _process_star(
 
         results.append(
             {
-                "kepoi_name": row["kepoi_name"],
-                "kepid": kepid,
-                "koi_disposition": row["koi_disposition"],
-                "label": LABEL_MAP[row["koi_disposition"]],
+                "id":          star_id,
+                "name":        row["name"],
+                "disposition": row["disposition"],
+                "period":      float(row["period"]),
+                "time0bk":     float(row["time0bk"]),
+                "duration":    float(row["duration"]),
+                "label":       LABEL_MAP[row["disposition"]],
+                "mission":     mission,
                 "global_view": global_view,
-                "local_view": local_view,
+                "local_view":  local_view,
             }
         )
         counts["ok"] += 1
@@ -377,41 +475,53 @@ def run_preprocessing(
     catalog: pd.DataFrame,
     max_stars: int | None,
     force: bool,
+    mission: str = MISSION_KEPLER,
 ) -> None:
     """
-    Iterate over every star in *catalog*, process its KOIs, and write output.
+    Iterate over every star in *catalog*, process its candidates, and write output.
+
+    Args:
+        catalog: Raw catalog DataFrame (Kepler or TESS — columns are normalized
+                 internally via _normalize_catalog).
+        max_stars: If set, only process the first N unique stars.
+        force:   If True, reprocess candidates whose .npz already exists.
+        mission: MISSION_KEPLER or MISSION_TESS.
     """
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     MANIFEST_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+    # Normalize catalog columns to mission-agnostic names.
+    catalog = _normalize_catalog(catalog, mission)
+
     # Group by star so each lightcurve is loaded and detrended only once.
-    star_groups = list(catalog.groupby("kepid"))
+    star_groups = list(catalog.groupby("id"))
     if max_stars is not None:
         star_groups = star_groups[:max_stars]
 
     n_stars = len(star_groups)
-    n_kois = sum(len(g) for _, g in star_groups)
-    log.info(f"Processing {n_kois} KOIs across {n_stars} stars ...")
+    n_candidates = sum(len(g) for _, g in star_groups)
+    id_label = "TIC" if mission == MISSION_TESS else "KIC"
+    log.info(f"Processing {n_candidates} candidates across {n_stars} stars ({mission}) ...")
 
     manifest_rows: list[dict] = []
     overall = {"ok": 0, "no_file": 0, "short": 0, "error": 0}
 
-    for i, (kepid, group) in enumerate(star_groups, start=1):
+    for i, (star_id, group) in enumerate(star_groups, start=1):
         if i == 1 or i % 100 == 0:
             pct = 100 * i / n_stars
-            log.info(f"  [{i:>4}/{n_stars}] ({pct:4.1f}%)  KIC {int(kepid):>9d}")
+            log.info(f"  [{i:>4}/{n_stars}] ({pct:4.1f}%)  {id_label} {int(star_id):>10d}")
 
-        results, counts = _process_star(int(kepid), group, force=force)
+        results, counts = _process_star(int(star_id), group, force=force, mission=mission)
 
         for key in overall:
             overall[key] += counts.get(key, 0)
 
         for r in results:
             if r.get("global_view") is None:
-                # Cached KOIs are counted in ok but have no arrays to save.
+                # Cached candidates are counted in ok but have no arrays to save.
                 continue
 
-            out_path = _npz_path(r["kepoi_name"])
+            out_path = _npz_path(r["name"])
 
             # Save global_view (201,) and local_view (61,) as a compressed
             # numpy archive.  Compression is ~5× smaller than uncompressed
@@ -425,11 +535,15 @@ def run_preprocessing(
 
             manifest_rows.append(
                 {
-                    "kepoi_name": r["kepoi_name"],
-                    "kepid": r["kepid"],
-                    "koi_disposition": r["koi_disposition"],
-                    "label": r["label"],
-                    "path": str(out_path.relative_to(ROOT)),
+                    "id":          r["id"],
+                    "name":        r["name"],
+                    "disposition": r["disposition"],
+                    "period":      r["period"],
+                    "time0bk":     r["time0bk"],
+                    "duration":    r["duration"],
+                    "label":       r["label"],
+                    "mission":     r["mission"],
+                    "path":        str(out_path.relative_to(ROOT)),
                 }
             )
 
@@ -441,8 +555,20 @@ def run_preprocessing(
 
         if MANIFEST_FILE.exists() and not force:
             existing = pd.read_csv(MANIFEST_FILE)
+            # Back-fill legacy manifests that used Kepler-specific column names.
+            if "kepoi_name" in existing.columns:
+                log.info("  Migrating legacy manifest to normalized schema ...")
+                existing = existing.rename(columns={
+                    "kepid":           "id",
+                    "kepoi_name":      "name",
+                    "koi_disposition": "disposition",
+                })
+                existing["mission"] = MISSION_KEPLER
+                for col in ["period", "time0bk", "duration"]:
+                    if col not in existing.columns:
+                        existing[col] = float("nan")
             combined = pd.concat([existing, new_df], ignore_index=True)
-            combined = combined.drop_duplicates(subset="kepoi_name", keep="last")
+            combined = combined.drop_duplicates(subset="name", keep="last")
             combined.to_csv(MANIFEST_FILE, index=False)
             manifest_df = combined
         else:
@@ -456,7 +582,7 @@ def run_preprocessing(
     # ------------------------------------------------------------------
     n_files = sum(1 for _ in PROCESSED_DIR.glob("*.npz"))
     log.info("=" * 60)
-    log.info("Preprocessing complete.")
+    log.info(f"Preprocessing complete ({mission}).")
     log.info(f"  ok         : {overall['ok']}")
     log.info(f"  no_file    : {overall['no_file']}  (star not downloaded in Phase 1)")
     log.info(f"  short      : {overall['short']}  (too few cadences after cleaning)")

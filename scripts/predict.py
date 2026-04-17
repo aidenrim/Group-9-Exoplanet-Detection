@@ -83,11 +83,11 @@ def main() -> None:
         sys.exit(1)
 
     manifest = pd.read_csv(MANIFEST_FILE)
-    matches = manifest[manifest["kepoi_name"] == args.candidate]
+    matches = manifest[manifest["name"] == args.candidate]
     if matches.empty:
         log.error(
             f"Candidate '{args.candidate}' not found in manifest.\n"
-            f"Example names: {manifest['kepoi_name'].sample(min(5, len(manifest))).tolist()}"
+            f"Example names: {manifest['name'].sample(min(5, len(manifest))).tolist()}"
         )
         sys.exit(1)
     row = matches.iloc[0]
@@ -143,7 +143,7 @@ def main() -> None:
     print()
     print("=" * 52)
     print(f"  Candidate    : {args.candidate}")
-    print(f"  Known label  : {known_label}  ({row['koi_disposition']})")
+    print(f"  Known label  : {known_label}  ({row['disposition']})")
     print(f"  Model        : {args.model}  "
           f"(epoch {epoch}, val AUC {best_val_auc:.4f})")
     print(f"  Probability  : {prob:.4f}")

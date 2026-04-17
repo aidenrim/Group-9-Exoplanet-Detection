@@ -4,15 +4,20 @@ Build and save train / val / test dataset splits.
 
 Reads data/datasets/manifest.csv (written by scripts/preprocess.py), performs
 a star-stratified split into train / val / test partitions, and saves the
-resulting DataFrames as CSV files in data/datasets/.
+resulting DataFrames as CSV files in data/datasets/{name}/.
 
-The split is done BY STAR (kepid) to prevent data leakage from multi-planet
+The split is done BY STAR (id column) to prevent data leakage from multi-planet
 systems sharing the same underlying lightcurve.
 
+Use --mission to restrict splits to one mission:
+    --mission kepler   Kepler KOIs only
+    --mission tess     TESS TOIs only
+    --mission both     All candidates (default)
+
 Output files:
-    data/datasets/train.csv
-    data/datasets/val.csv
-    data/datasets/test.csv
+    data/datasets/{name}/train.csv
+    data/datasets/{name}/val.csv
+    data/datasets/{name}/test.csv
 
 These files are loaded by scripts/train.py — run this script once before
 training, or any time you want to rebuild the splits with different fractions
@@ -20,8 +25,9 @@ or a different random seed.
 
 Usage:
     python scripts/build_dataset.py --name full_dataset
+    python scripts/build_dataset.py --name kepler_only --mission kepler
+    python scripts/build_dataset.py --name tess_v1 --mission tess
     python scripts/build_dataset.py --name small_test --val-frac 0.10 --test-frac 0.10
-    python scripts/build_dataset.py --name full_dataset --random-state 123
 """
 
 import argparse
@@ -32,6 +38,7 @@ from pathlib import Path
 # Add project root to path so src.* imports work regardless of working directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pandas as pd
 from src.data.dataset import DATASETS_DIR, MANIFEST_FILE, ROOT, make_splits, save_splits
 
 # ---------------------------------------------------------------------------
@@ -80,6 +87,12 @@ def main() -> None:
         default=42,
         help="Random seed for reproducible splits (default: 42).",
     )
+    parser.add_argument(
+        "--mission",
+        choices=["kepler", "tess", "both"],
+        default="both",
+        help="Filter manifest to one mission before splitting (default: both).",
+    )
     args = parser.parse_args()
 
     if not MANIFEST_FILE.exists():
@@ -91,16 +104,23 @@ def main() -> None:
 
     named_dir = DATASETS_DIR / args.name
 
+    manifest = pd.read_csv(MANIFEST_FILE)
+
+    if "mission" in manifest.columns and args.mission != "both":
+        target = args.mission.upper()
+        manifest = manifest[manifest["mission"] == target].reset_index(drop=True)
+        log.info(f"  Filtered to {target}: {len(manifest)} rows")
+
     log.info(f"Building splits from {MANIFEST_FILE} ...")
     log.info(
-        f"  Name — {args.name}  |  "
+        f"  Name — {args.name}  |  mission: {args.mission}  |  "
         f"train: {1 - args.val_frac - args.test_frac:.2f}  "
         f"val: {args.val_frac}  test: {args.test_frac}  "
         f"(random_state={args.random_state})"
     )
 
     train_df, val_df, test_df = make_splits(
-        manifest_path=MANIFEST_FILE,
+        manifest_df=manifest,
         val_frac=args.val_frac,
         test_frac=args.test_frac,
         random_state=args.random_state,

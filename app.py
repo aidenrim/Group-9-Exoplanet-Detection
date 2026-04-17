@@ -4,16 +4,14 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.models.predict import load_model, predict_koi
 
-ROOT         = Path(__file__).resolve().parent
-CATALOG_FILE = ROOT / "data" / "catalogs" / "koi_cumulative.csv"
-RESULTS_DIR  = ROOT / "results"
+ROOT        = Path(__file__).resolve().parent
+RESULTS_DIR = ROOT / "results"
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -22,7 +20,7 @@ RESULTS_DIR  = ROOT / "results"
 st.set_page_config(page_title="Exoplanet CNN Classifier", layout="centered")
 st.title("Exoplanet CNN Classifier")
 st.write(
-    "Enter a KOI name to classify it as a planet candidate or false positive "
+    "Enter a KOI or TOI name to classify it as a planet candidate or false positive "
     "using the trained dual-branch lightcurve CNN."
 )
 
@@ -55,7 +53,7 @@ st.sidebar.caption(
 # Main — KOI input and classification
 # ---------------------------------------------------------------------------
 
-kepoi_name = st.text_input("KOI Name", placeholder="e.g. K00010.01, K00113.01")
+kepoi_name = st.text_input("KOI / TOI Name", placeholder="e.g. K00010.01  or  TOI-103.01")
 
 if st.button("Run Classification") and kepoi_name.strip():
     with st.spinner("Running classification..."):
@@ -72,7 +70,7 @@ if st.button("Run Classification") and kepoi_name.strip():
             st.stop()
 
     # --- result banner ----------------------------------------------------
-    label = "Planet Candidate" if result["prediction"] == 1 else "False Positive"
+    label = "Planet Predicted" if result["prediction"] == 1 else "Not a Planet Predicted"
     color = "green"            if result["prediction"] == 1 else "red"
     st.markdown(f"### Result: :{color}[{label}]")
 
@@ -83,28 +81,23 @@ if st.button("Run Classification") and kepoi_name.strip():
     col3.metric("Threshold",   f"{result['threshold']:.2f}")
 
     # --- known disposition ------------------------------------------------
-    known_map = {1: "CONFIRMED / CANDIDATE", 0: "FALSE POSITIVE"}
-    known_str = known_map.get(result["known_label"], "UNKNOWN")
-    st.caption(
-        f"Known disposition: **{result['koi_disposition']}** ({known_str}) "
-        f"· Kepler ID: {result['kepid']}"
+    is_tess = kepoi_name.strip().upper().startswith("TOI")
+    star_label = "TIC ID" if is_tess else "Kepler ID"
+    disp_str = (
+        "Planet" if result["disposition"] == "CONFIRMED"
+        else "Not a Planet" if result["disposition"] == "FALSE POSITIVE"
+        else "Unconfirmed (Candidate)"
     )
+    st.caption(f"Known disposition: **{disp_str}** · {star_label}: {result['id']}")
 
-    # --- orbital period from catalog -------------------------------------
-    try:
-        catalog = pd.read_csv(CATALOG_FILE)
-        cat_matches = catalog[catalog["kepoi_name"] == kepoi_name.strip()]
-        if not cat_matches.empty:
-            cat_row = cat_matches.iloc[0]
-            period   = cat_row["koi_period"]
-            duration = cat_row["koi_duration"]
-            p_col, d_col = st.columns(2)
-            if not math.isnan(period):
-                p_col.metric("Orbital period",   f"{period:.4f} days")
-            if not math.isnan(duration):
-                d_col.metric("Transit duration", f"{duration:.2f} hours")
-    except Exception:
-        pass
+    # --- orbital period from manifest ------------------------------------
+    p_col, d_col = st.columns(2)
+    period   = result.get("period", float("nan"))
+    duration = result.get("duration", float("nan"))
+    if not math.isnan(period):
+        p_col.metric("Orbital period",   f"{period:.4f} days")
+    if not math.isnan(duration):
+        d_col.metric("Transit duration", f"{duration:.2f} hours")
 
     # --- lightcurve plots -------------------------------------------------
     st.subheader("Phase-folded lightcurve views")

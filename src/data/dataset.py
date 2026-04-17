@@ -136,6 +136,7 @@ def make_weighted_sampler(dataset: KOIDataset) -> WeightedRandomSampler:
 
 def make_splits(
     manifest_path: Path = MANIFEST_FILE,
+    manifest_df: pd.DataFrame | None = None,
     val_frac: float = 0.15,
     test_frac: float = 0.15,
     random_state: int = 42,
@@ -146,12 +147,15 @@ def make_splits(
     Strategy
     --------
     1.  Compute a star-level label: 1 if the star has at least one planet or
-        candidate KOI, 0 if all its KOIs are false positives.
+        candidate, 0 if all its candidates are false positives.
     2.  Stratified-split those star IDs 70 / 15 / 15 (default).
-    3.  Assign every KOI to whichever split its host star ended up in.
+    3.  Assign every candidate to whichever split its host star ended up in.
 
     Args:
         manifest_path:  Path to manifest.csv written by preprocess.py.
+                        Ignored when manifest_df is provided.
+        manifest_df:    Optional pre-filtered DataFrame to use instead of
+                        reading from disk (used by build_dataset.py --mission).
         val_frac:       Fraction of all data to reserve for validation.
         test_frac:      Fraction of all data to reserve for testing.
         random_state:   Seed for reproducibility.
@@ -159,10 +163,10 @@ def make_splits(
     Returns:
         (train_df, val_df, test_df) — DataFrames ready to pass into KOIDataset.
     """
-    manifest = pd.read_csv(manifest_path)
+    manifest = manifest_df if manifest_df is not None else pd.read_csv(manifest_path)
 
     # --- Star-level labels ------------------------------------------------
-    star_labels = manifest.groupby("kepid")["label"].max()
+    star_labels = manifest.groupby("id")["label"].max()
     stars   = star_labels.index.to_numpy()
     slabels = star_labels.to_numpy()
 
@@ -184,10 +188,10 @@ def make_splits(
         random_state=random_state,
     )
 
-    # --- Assign KOIs to splits --------------------------------------------
-    train_df = manifest[manifest["kepid"].isin(train_stars)].reset_index(drop=True)
-    val_df   = manifest[manifest["kepid"].isin(val_stars)  ].reset_index(drop=True)
-    test_df  = manifest[manifest["kepid"].isin(test_stars) ].reset_index(drop=True)
+    # --- Assign candidates to splits -------------------------------------
+    train_df = manifest[manifest["id"].isin(train_stars)].reset_index(drop=True)
+    val_df   = manifest[manifest["id"].isin(val_stars)  ].reset_index(drop=True)
+    test_df  = manifest[manifest["id"].isin(test_stars) ].reset_index(drop=True)
 
     return train_df, val_df, test_df
 
