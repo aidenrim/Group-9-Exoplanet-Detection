@@ -21,13 +21,13 @@ EARTH_RADII_PER_SOLAR = 109.2
 r_planet_solar = PLANET_RADIUS / EARTH_RADII_PER_SOLAR
 depth = (r_planet_solar / STAR_RADIUS) ** 2
 
-# transit half-duration in days — simplified, capped to stay reasonable
+# transit half-duration in days
 half_dur = min(0.08 * ORBITAL_PERIOD, 0.6)
 
 # time array
 t = np.linspace(0, TOTAL_DAYS, NUM_POINTS)
 
-# flux array — start everything at 1.0 (normalized baseline)
+# flux array - start everything at 1.0
 flux = np.ones(NUM_POINTS)
 
 # apply transit dips
