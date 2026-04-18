@@ -3,20 +3,15 @@ Dataset library
 ===============
 
 PyTorch Dataset class, train/val/test split utilities, and split
-persistence for the preprocessed KOI lightcurve arrays.
+persistence for the preprocessed lightcurve arrays.
 
-The split is done BY STAR (kepid), not by individual KOI.  Two planet
+The split is done by star (id), not by individual KOIs or TOIs. Two planet
 candidates on the same star were extracted from the same underlying
 lightcurve, so their global-view arrays share the same noise floor, the
 same stellar-variability residuals, and the same inter-quarter normalisation
-artefacts.  Splitting by KOI would allow the model to see those patterns in
-both training and test — a data leak that would inflate test-set performance
-metrics without reflecting real generalisation.
-
-Splitting by star and stratifying by the star's dominant label ensures:
-  • No star appears in more than one split.
-  • Each split has approximately the same positive/negative ratio.
-  • Multi-planet systems are kept intact.
+artefacts.  Splitting by KOI/TOI could allow the model to see the exact patterns at
+both training and test times, which would improve performance on the test set but
+negatively affect generalization.
 """
 
 from pathlib import Path
@@ -44,7 +39,7 @@ class KOIDataset(Dataset):
     """
     Loads (global_view, local_view, label) triplets from preprocessed .npz files.
 
-    Each item corresponds to one KOI (Kepler Object of Interest).  The arrays
+    Each item corresponds to one Object of Interest.  The arrays
     were written by preprocess.py and have fixed shapes:
 
         global_view : float32 (201,)   full phase-folded, baseline-centred
@@ -63,7 +58,7 @@ class KOIDataset(Dataset):
         """
         Args:
             manifest: DataFrame slice with at minimum columns
-                      [kepoi_name, kepid, label, path].
+                      [name, id, label, path].
                       Pass in the train, val, or test sub-DataFrame from
                       make_splits() or load_splits(); do not pass the full
                       manifest here.
@@ -76,18 +71,17 @@ class KOIDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         row = self.manifest.iloc[idx]
 
-        # The 'path' column stores a path relative to the project root so that
-        # the manifest stays portable across machines.
         data = np.load(ROOT / row["path"])
 
-        global_view = torch.from_numpy(data["global_view"]).float()   # (201,)
-        local_view  = torch.from_numpy(data["local_view"]).float()    # (61,)
-        label       = torch.tensor(float(row["label"]), dtype=torch.float32)
+        global_view = torch.from_numpy(data["global_view"]).float()     # (201,)
+        local_view = torch.from_numpy(data["local_view"]).float()       # (61,)
+        label = torch.tensor(float(row["label"]), dtype=torch.float32)
 
         return global_view, local_view, label
 
     def get_labels(self) -> np.ndarray:
-        """Return all labels as a 1-D numpy array.
+        """
+        Returns all labels as a 1-D numpy array.
 
         Used by make_weighted_sampler() to build per-sample weights without
         iterating through __getitem__ for every sample.
@@ -95,7 +89,7 @@ class KOIDataset(Dataset):
         return self.manifest["label"].to_numpy(dtype=np.int64)
 
     def class_counts(self) -> tuple[int, int]:
-        """Return (n_positives, n_negatives) for this split."""
+        """Returns (n_positives, n_negatives) for this split."""
         labels = self.get_labels()
         n_pos = int(labels.sum())
         return n_pos, len(labels) - n_pos
@@ -114,8 +108,7 @@ def make_weighted_sampler(dataset: KOIDataset) -> WeightedRandomSampler:
     frequency, so on average each batch will contain equal numbers of planets
     and false positives regardless of the true class ratio.
 
-    This is an *alternative* to passing pos_weight to BCEWithLogitsLoss.
-    Both approaches address class imbalance; use one or the other, not both.
+    Alternative to passing pos_weight to BCEWithLogitsLoss.
     """
     labels = dataset.get_labels()
     n_pos = labels.sum()
@@ -150,8 +143,8 @@ def make_splits(
 
     Strategy
     --------
-    1.  Compute a star-level label: 1 if the star has at least one planet or
-        candidate, 0 if all its candidates are false positives.
+    1.  Compute a star-level label: 1 if the star has at least one instance of
+        the positive class, 0 if all its candidates are known false positives.
     2.  Stratified-split those star IDs 70 / 15 / 15 (default).
     3.  Assign every candidate to whichever split its host star ended up in.
 
@@ -212,11 +205,7 @@ def save_splits(
     datasets_dir: Path = DATASETS_DIR,
 ) -> None:
     """
-    Save train / val / test split DataFrames to CSV files in *datasets_dir*.
-
-    Written by scripts/build_dataset.py; loaded by scripts/train.py via
-    load_splits().  Persisting the splits guarantees that every training run
-    uses identical partitions without re-running the split logic.
+    Save train / val / test split DataFrames to CSV files in datasets_dir.
     """
     datasets_dir.mkdir(parents=True, exist_ok=True)
     train_df.to_csv(datasets_dir / "train.csv", index=False)
@@ -235,8 +224,7 @@ def load_splits(
                       data/datasets/full_dataset/.  Must contain
                       train.csv, val.csv, and test.csv.
 
-    Raises FileNotFoundError if any of the split CSVs do not exist — run
-    scripts/build_dataset.py --name <name> first.
+    Raises FileNotFoundError if any of the split CSVs do not exist
     """
     for fname in ["train.csv", "val.csv", "test.csv"]:
         path = datasets_dir / fname
@@ -272,10 +260,8 @@ def make_loaders(
         use_weighted_sampler:
             If True, draw balanced batches via WeightedRandomSampler.
             If False (default), rely on pos_weight in BCEWithLogitsLoss instead.
-            Do not set both True at the same time.
         num_workers:
-            Number of worker processes for data loading.  Set to 0 on
-            systems where multiprocessing causes issues (e.g. some macOS configs).
+            Number of worker processes for data loading.
 
     Returns:
         (train_loader, val_loader, test_loader)

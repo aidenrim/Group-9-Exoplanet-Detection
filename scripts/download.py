@@ -5,8 +5,8 @@ Download KOI/TOI catalogs and lightcurves for Kepler and/or TESS.
 Two-step pipeline per mission:
 
   Step 1 — Catalog
-      Kepler: Downloads the KOI cumulative table → data/catalogs/koi_cumulative.csv
-      TESS:   Downloads the TOI table            → data/catalogs/toi_catalog.csv
+      Kepler: Downloads the KOI cumulative table -> data/catalogs/koi_cumulative.csv
+      TESS:   Downloads the TOI table            -> data/catalogs/toi_catalog.csv
 
   Step 2 — Lightcurves
       Kepler: kic_XXXXXXXXX.fits  (long-cadence, one per KIC star)

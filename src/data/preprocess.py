@@ -5,15 +5,15 @@ Preprocessing library
 Converts raw stitched lightcurves (Phase 1) into fixed-length, normalized
 arrays ready for CNN input.
 
-Each KOI produces two 1-D arrays:
+Each Object of Interest produces two 1-D arrays:
 
-    Global view  (201 points)
+    Global view (201 points)
         The full phase-folded lightcurve binned uniformly across [-0.5, 0.5].
         Gives the network overall context — out-of-transit noise floor, any
         secondary eclipse near phase ±0.5 (a red-flag for eclipsing binaries),
         and ellipsoidal brightness variations.
 
-    Local view   ( 61 points)
+    Local view (61 points)
         A zoomed window centred on the transit (phase 0), spanning ±2 transit
         durations in phase space.  Gives fine morphology — a flat-bottomed
         U-shape is planetary; a pointed V-shape suggests an eclipsing binary
@@ -21,13 +21,13 @@ Each KOI produces two 1-D arrays:
 
 Pipeline per KOI
 ----------------
-    1.  Load stitched Kepler lightcurve from FITS (written by download.py)
+    1.  Load stitched lightcurve from FITS (written by download.py)
     2.  Remove NaN cadences (gaps between quarters leave NaN padding)
     3.  Clip upward flux spikes > 5σ using MAD-based sigma estimate
         — preserves downward transit dips, removes cosmic-ray hits
-    4.  Detrend with a 301-cadence Savitzky-Golay filter (≈6.3 days at
-        30-min Kepler cadence) to divide out slow stellar variability
-    5.  Phase-fold on the KOI catalog period and epoch, stacking all
+    4.  Detrend with a 301-cadence Savitzky-Golay filter to divide
+        out slow stellar variability
+    5.  Phase-fold on the catalog period and epoch, stacking all
         transits to boost signal-to-noise
     6.  Bin into global view  (201 bins, range [-0.5,  0.5] in phase)
     7.  Bin into local  view  ( 61 bins, range [-2T, +2T] in phase,
@@ -72,7 +72,7 @@ MIN_LOCAL_HALF_WIDTH = 0.01   # ≥ 1 % of the period on each side
 MAX_LOCAL_HALF_WIDTH = 0.25   # ≤ 25 % of the period on each side
 
 # Savitzky-Golay window for stellar-variability removal.
-# Long-cadence Kepler = 30-min sampling → 48 cadences / day.
+# Long-cadence Kepler = 30-min sampling -> 48 cadences / day.
 # 301 cadences ≈ 6.3 days — wide enough to track typical stellar rotation
 # (> 10 days for most Kepler targets) without distorting the transit shape
 # (longest KOI transit duration ≈ 15 hours ≈ 30 cadences, well inside one bin).
@@ -94,7 +94,7 @@ BTJD_OFFSET = 2457000.0
 MISSION_KEPLER = "KEPLER"
 MISSION_TESS   = "TESS"
 
-# TESS TFOPWG disposition codes → normalized disposition strings.
+# TESS TFOPWG disposition codes -> normalized disposition strings.
 _TESS_DISP_MAP: dict[str, str] = {
     "CP": "CONFIRMED",
     "KP": "CONFIRMED",
@@ -143,14 +143,10 @@ def _npz_path(name: str) -> Path:
     Path for the processed output of one KOI or TOI.
 
     Dots are replaced with underscores so the filename is safe on all
-    filesystems (e.g. 'K00001.01' → 'K00001_01.npz',
-    'TOI-103.01' → 'TOI-103_01.npz').
+    filesystems (e.g. 'K00001.01' -> 'K00001_01.npz',
+    'TOI-103.01' -> 'TOI-103_01.npz').
     """
     return PROCESSED_DIR / f"{name.replace('.', '_')}.npz"
-
-
-# Keep an alias for TESS — both missions use the same naming logic.
-_tess_npz_path = _npz_path
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +164,8 @@ def _normalize_catalog(catalog: pd.DataFrame, mission: str) -> pd.DataFrame:
         disposition str     'CONFIRMED', 'CANDIDATE', or 'FALSE POSITIVE'
         period      float   Orbital period in days
         time0bk     float   Transit epoch in mission-native time:
-                              Kepler → BKJD (unchanged from koi_time0bk)
-                              TESS   → BTJD = pl_tranmid − 2,457,000
+                              Kepler -> BKJD (unchanged from koi_time0bk)
+                              TESS   -> BTJD = pl_tranmid − 2,457,000
         duration    float   Transit duration in hours
 
     Kepler source columns : kepid, kepoi_name, koi_disposition,
@@ -192,7 +188,7 @@ def _normalize_catalog(catalog: pd.DataFrame, mission: str) -> pd.DataFrame:
         df["name"]        = df["toi"].apply(lambda x: f"TOI-{float(x):.2f}")
         df["disposition"] = df["tfopwg_disp"].map(_TESS_DISP_MAP)
         df["period"]      = df["pl_orbper"]
-        df["time0bk"]     = df["pl_tranmid"] - BTJD_OFFSET   # BJD → BTJD
+        df["time0bk"]     = df["pl_tranmid"] - BTJD_OFFSET   # BJD -> BTJD
         df["duration"]    = df["pl_trandurh"]
 
     return df[["id", "name", "disposition", "period", "time0bk", "duration"]].copy()
@@ -589,7 +585,7 @@ def run_preprocessing(
     log.info(f"  no_file    : {overall['no_file']}  (star not downloaded in Phase 1)")
     log.info(f"  short      : {overall['short']}  (too few cadences after cleaning)")
     log.info(f"  error      : {overall['error']}")
-    log.info(f"  .npz files : {n_files}  →  {PROCESSED_DIR}")
+    log.info(f"  .npz files : {n_files}  ->  {PROCESSED_DIR}")
     log.info(f"  manifest   : {MANIFEST_FILE}")
 
     if not manifest_df.empty and "label" in manifest_df.columns:

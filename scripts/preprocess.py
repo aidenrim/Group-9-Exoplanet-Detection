@@ -17,7 +17,7 @@ Pipeline per candidate:
          TESS:   4537 cadences (2-min sampling)
     5. Phase-fold on (period, epoch) from catalog
     6. Bin into global (201) and local (61) views
-    7. Subtract 1.0 → baseline = 0; fill empty bins with 0.0
+    7. Subtract 1.0 -> baseline = 0; fill empty bins with 0.0
     8. Save as .npz; append row to data/datasets/manifest.csv
 
 Usage:

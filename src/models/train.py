@@ -193,7 +193,7 @@ def evaluate(
     # signaling-NaN bit patterns that np.isnan() misses and nan_to_num doesn't
     # catch; those survive to astype(int) and overflow to INT64_MIN (-2^63).
     # A boolean comparison is safe for *any* NaN variant: IEEE 754 guarantees
-    # that NaN comparisons always return False, so NaN → 0 with no cast involved.
+    # that NaN comparisons always return False, so NaN -> 0 with no cast involved.
     labels_int = np.where(labels_arr >= 0.5, 1, 0)
     try:
         auc = roc_auc_score(labels_int, probs_arr)
@@ -279,7 +279,7 @@ def plot_training_curves(
     fig.tight_layout()
     fig.savefig(save_path, dpi=150)
     plt.close(fig)
-    log.info(f"  Saved training curves → {save_path}")
+    log.info(f"  Saved training curves -> {save_path}")
 
 
 def plot_roc_curve(
@@ -309,7 +309,7 @@ def plot_roc_curve(
     fig.tight_layout()
     fig.savefig(save_path, dpi=150)
     plt.close(fig)
-    log.info(f"  Saved ROC curve → {save_path}")
+    log.info(f"  Saved ROC curve -> {save_path}")
 
 
 def plot_confusion_matrix(
@@ -328,7 +328,7 @@ def plot_confusion_matrix(
     fig.tight_layout()
     fig.savefig(save_path, dpi=150)
     plt.close(fig)
-    log.info(f"  Saved confusion matrix → {save_path}")
+    log.info(f"  Saved confusion matrix -> {save_path}")
 
 
 # ---------------------------------------------------------------------------

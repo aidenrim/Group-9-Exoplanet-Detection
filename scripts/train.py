@@ -11,7 +11,7 @@ Training loop summary:
   • Optimiser : Adam with L2 weight decay
   • Scheduler : ReduceLROnPlateau (halves LR when val AUC stalls)
   • Stopping  : Early stopping on val AUC
-  • Checkpoint: best model by val AUC → results/checkpoints/best_model.pt
+  • Checkpoint: best model by val AUC -> results/checkpoints/best_model.pt
 
 Outputs:
   results/checkpoints/best_model.pt

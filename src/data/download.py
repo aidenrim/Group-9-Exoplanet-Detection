@@ -2,19 +2,19 @@
 Data acquisition library
 ========================
 
-Functions for downloading the Kepler KOI catalog and raw lightcurves.
+Functions for downloading the Kepler and Tess Objects of Interest catalogs and raw lightcurves.
 
 Two-step pipeline:
 
   Step 1 — Catalog
-      Downloads the Kepler KOI (Kepler Objects of Interest) cumulative table
-      from the NASA Exoplanet Archive via their TAP (Table Access Protocol) API.
-      Each row is one planet candidate (KOI); we keep the disposition label,
-      orbital period, transit epoch, and transit duration — everything needed
+      Downloads the appropriage cumulative table
+      from the NASA Exoplanet Archive via their TAP API.
+      Each row is one object of interest; we keep the disposition label,
+      orbital period, transit epoch, and transit duration — columns needed
       later to phase-fold the lightcurve.
 
   Step 2 — Lightcurves
-      For each unique Kepler star (identified by KIC ID) in the catalog,
+      For each unique star (identified by ID) in the catalog,
       downloads all available long-cadence (30-min) quarters from MAST using
       the `lightkurve` library, stitches them into a single continuous
       lightcurve, and saves it as a FITS file on disk.
@@ -45,7 +45,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 CATALOG_DIR = ROOT / "data" / "catalogs"
 RAW_DIR = ROOT / "data" / "raw"
 
-CATALOG_FILE = CATALOG_DIR / "koi_cumulative.csv"
+KEPLER_CATALOG_FILE = CATALOG_DIR / "koi_cumulative.csv"
 
 # ---------------------------------------------------------------------------
 # NASA Exoplanet Archive — KOI cumulative table via TAP
@@ -59,34 +59,14 @@ CATALOG_FILE = CATALOG_DIR / "koi_cumulative.csv"
 # ---------------------------------------------------------------------------
 
 _TAP_BASE = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
-_TAP_QUERY = (
+KEPLER_TAP_QUERY = (
     "select kepid, kepoi_name, koi_disposition, "
     "koi_period, koi_time0bk, koi_duration "
     "from cumulative"
 )
-KOI_CATALOG_URL = f"{_TAP_BASE}?{urllib.parse.urlencode({'query': _TAP_QUERY, 'format': 'csv'})}"
+KOI_CATALOG_URL = f"{_TAP_BASE}?{urllib.parse.urlencode({'query': KEPLER_TAP_QUERY, 'format': 'csv'})}"
 
-# Dispositions we keep.  CONFIRMED and CANDIDATE are positive examples;
-# FALSE POSITIVE (eclipsing binaries, background stars, etc.) are negatives.
 VALID_DISPOSITIONS = {"CONFIRMED", "CANDIDATE", "FALSE POSITIVE"}
-
-# ---------------------------------------------------------------------------
-# TESS — TOI catalog and lightcurve constants
-# ---------------------------------------------------------------------------
-
-TESS_CATALOG_FILE = CATALOG_DIR / "toi_catalog.csv"
-
-_TESS_TAP_QUERY = (
-    "select tid, toi, tfopwg_disp, pl_orbper, pl_tranmid, pl_trandurh "
-    "from toi"
-)
-TESS_CATALOG_URL = (
-    f"{_TAP_BASE}?"
-    + urllib.parse.urlencode({"query": _TESS_TAP_QUERY, "format": "csv"})
-)
-
-# TFOPWG dispositions we keep (CP/KP = confirmed, PC = candidate, FP/FA = false positive).
-TESS_VALID_DISPOSITIONS = {"CP", "KP", "PC", "FP", "FA"}
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +77,7 @@ log = logging.getLogger(__name__)
 
 def download_catalog(force: bool = False) -> pd.DataFrame:
     """
-    Fetch the KOI cumulative table from NASA Exoplanet Archive and return a
+    Fetch the catalog table from NASA Exoplanet Archive and return a
     cleaned DataFrame.
 
     Columns returned:
@@ -113,9 +93,9 @@ def download_catalog(force: bool = False) -> pd.DataFrame:
     """
     CATALOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    if CATALOG_FILE.exists() and not force:
-        log.info(f"Catalog found on disk — loading {CATALOG_FILE}")
-        df = pd.read_csv(CATALOG_FILE)
+    if KEPLER_CATALOG_FILE.exists() and not force:
+        log.info(f"Catalog found on disk — loading {KEPLER_CATALOG_FILE}")
+        df = pd.read_csv(KEPLER_CATALOG_FILE)
         log.info(f"  {len(df)} KOIs loaded from cache.")
         return df
 
@@ -156,8 +136,8 @@ def download_catalog(force: bool = False) -> pd.DataFrame:
     disposition_counts = df["koi_disposition"].value_counts().to_dict()
     log.info(f"  Final catalog: {len(df)} KOIs — {disposition_counts}")
 
-    df.to_csv(CATALOG_FILE, index=False)
-    log.info(f"  Saved to {CATALOG_FILE}")
+    df.to_csv(KEPLER_CATALOG_FILE, index=False)
+    log.info(f"  Saved to {KEPLER_CATALOG_FILE}")
     return df
 
 
@@ -271,7 +251,7 @@ def download_lightcurves(kepids: list[int], workers: int = 4) -> dict[str, int]:
     threading (not multiprocessing) is the right concurrency model here.
     Keep workers ≤ 8 to stay within MAST's informal rate limits.
 
-    Returns a dict mapping status → count for final reporting.
+    Returns a dict mapping status -> count for final reporting.
     """
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -307,6 +287,25 @@ def download_lightcurves(kepids: list[int], workers: int = 4) -> dict[str, int]:
                     log.info(f"  [{i:>4}/{total}] KIC {kepid:>9}: {status}")
 
     return counts
+
+
+# ---------------------------------------------------------------------------
+# TESS — TOI catalog and lightcurve constants
+# ---------------------------------------------------------------------------
+
+TESS_CATALOG_FILE = CATALOG_DIR / "toi_catalog.csv"
+
+TESS_TAP_QUERY = (
+    "select tid, toi, tfopwg_disp, pl_orbper, pl_tranmid, pl_trandurh "
+    "from toi"
+)
+TESS_CATALOG_URL = (
+    f"{_TAP_BASE}?"
+    + urllib.parse.urlencode({"query": TESS_TAP_QUERY, "format": "csv"})
+)
+
+# TFOPWG dispositions we keep (CP/KP = confirmed, PC = candidate, FP/FA = false positive).
+TESS_VALID_DISPOSITIONS = {"CP", "KP", "PC", "FP", "FA"}
 
 
 # ---------------------------------------------------------------------------
