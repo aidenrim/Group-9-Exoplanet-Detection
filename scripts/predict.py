@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Classify a single KOI candidate using a trained ExoplanetCNN.
 

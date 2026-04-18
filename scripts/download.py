@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Download KOI/TOI catalogs and lightcurves for Kepler and/or TESS.
 
