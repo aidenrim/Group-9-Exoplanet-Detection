@@ -51,11 +51,12 @@ KEPLER_CATALOG_FILE = CATALOG_DIR / "koi_cumulative.csv"
 # NASA Exoplanet Archive — KOI cumulative table via TAP
 #
 # The TAP (Table Access Protocol) endpoint accepts an ADQL/SQL-like query and
-# returns results as plain CSV.  We only fetch the six columns we actually use
+# returns results as plain CSV. We only fetch the six columns we actually use
 # so the download stays small (~500 KB instead of ~10 MB for the full table).
 #
-# Table reference:
+# Table references:
 #   https://exoplanetarchive.ipac.caltech.edu/docs/API_kepcandidate_columns.html
+#   https://exoplanetarchive.ipac.caltech.edu/docs/API_TOI_columns.html
 # ---------------------------------------------------------------------------
 
 _TAP_BASE = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"
@@ -75,7 +76,7 @@ log = logging.getLogger(__name__)
 # Step 1: Catalog download
 # ---------------------------------------------------------------------------
 
-def download_catalog(force: bool = False) -> pd.DataFrame:
+def download_kepler_catalog(force: bool = False) -> pd.DataFrame:
     """
     Fetch the catalog table from NASA Exoplanet Archive and return a
     cleaned DataFrame.
@@ -83,9 +84,9 @@ def download_catalog(force: bool = False) -> pd.DataFrame:
     Columns returned:
         kepid           int     Kepler Input Catalog star ID
         kepoi_name      str     KOI identifier, e.g. "K00001.01"
-        koi_disposition str     "CONFIRMED", "CANDIDATE", or "FALSE POSITIVE"
+        koi_disposition str     "CONFIRMED", "CANDIDATE", "FALSE POSITIVE", or "NOT DISPOSITIONED"
         koi_period      float   Orbital period in days
-        koi_time0bk     float   Transit epoch in BKJD (BJD − 2 454 833.0)
+        koi_time0bk     float   Transit epoch in BKJD (BJD - 2454833.0)
         koi_duration    float   Transit duration in hours
 
     The file is cached at data/catalogs/koi_cumulative.csv and reused on
@@ -145,18 +146,18 @@ def download_catalog(force: bool = False) -> pd.DataFrame:
 # Step 2: Per-star lightcurve download
 # ---------------------------------------------------------------------------
 
-def _fits_path(kepid: int) -> Path:
+def _kepler_fits_path(kepid: int) -> Path:
     """Return the expected on-disk path for a star's stitched lightcurve."""
     # Zero-pad to 9 digits to match the KIC naming convention.
     return RAW_DIR / f"kic_{kepid:09d}.fits"
 
 
-def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
+def _download_one_kepler_star(kepid: int, retries: int = 3) -> tuple[int, str]:
     """
     Download, stitch, and save all long-cadence Kepler quarters for one star.
 
-    Each Kepler quarter is a ~90-day segment.  Most stars have ~17 quarters
-    across the 4-year mission.  We:
+    Each Kepler quarter is a ~90-day segment. Most stars have ~17 quarters
+    across the 4-year mission. We:
       1. Search MAST for all available long-cadence products for this KIC ID.
       2. Download each quarter as a LightCurve object (PDCSAP flux preferred).
       3. Stitch all quarters into one continuous LightCurve — lightkurve
@@ -165,7 +166,7 @@ def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
       4. Write the result to a FITS file.
 
     PDCSAP_FLUX (Pre-search Data Conditioning SAP Flux) is the pre-processed
-    flux column from the Kepler pipeline.  It has long-term instrumental trends
+    flux column from the Kepler pipeline. It has long-term instrumental trends
     removed using co-trending basis vectors, making it much cleaner than raw
     SAP flux while preserving transit signals.
 
@@ -175,7 +176,7 @@ def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
         'not_found'   — MAST returned no results for this KIC ID
         'error:<msg>' — an exception occurred (after all retries)
     """
-    out_path = _fits_path(kepid)
+    out_path = _kepler_fits_path(kepid)
     if out_path.exists():
         return kepid, "cached"
 
@@ -194,7 +195,7 @@ def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
             if len(search) == 0:
                 return kepid, "not_found"
 
-            # Download all quarters.  quality_bitmask="default" masks cadences
+            # Download all quarters. quality_bitmask="default" masks cadences
             # flagged for known instrumental problems (attitude tweaks, cosmic
             # rays, safe-mode events, etc.) without being overly aggressive.
             collection = search.download_all(
@@ -205,7 +206,7 @@ def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
             if collection is None or len(collection) == 0:
                 return kepid, "not_found"
 
-            # Stitch quarters.  Each quarter is normalized to its own median
+            # Stitch quarters. Each quarter is normalized to its own median
             # before concatenation so inter-quarter offsets don't create
             # artificial steps in the combined lightcurve.
             lc = collection.stitch()
@@ -215,12 +216,11 @@ def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
             return kepid, "downloaded"
 
         except Exception as exc:
-            # lightkurve caches individual quarter FITS files.  If a download
+            # lightkurve caches individual quarter FITS files. If a download
             # was interrupted the truncated file remains in the cache and every
-            # subsequent retry reads the same corrupt copy — exponential backoff
-            # alone does not help.  When the error message names a specific file
-            # in the lightkurve cache, delete it so the next attempt fetches a
-            # fresh copy from MAST.
+            # subsequent retry reads the same corrupt copy. When the error message
+            # names a specific file in the lightkurve cache, delete it so the next
+            # attempt fetches a fresh copy from MAST.
             exc_str = str(exc)
             match = re.search(r"(/[^\s]+\.fits)", exc_str)
             if match:
@@ -239,16 +239,13 @@ def _download_one_star(kepid: int, retries: int = 3) -> tuple[int, str]:
             else:
                 return kepid, f"error:{exc}"
 
-    # Should be unreachable, but satisfies the type-checker.
+    # Should be unreachable
     return kepid, "error:max retries exceeded"
 
 
-def download_lightcurves(kepids: list[int], workers: int = 4) -> dict[str, int]:
+def download_kepler_lightcurves(kepids: list[int], workers: int = 4) -> dict[str, int]:
     """
     Download lightcurves for every KIC ID in *kepids* using a thread pool.
-
-    MAST is an HTTP service and most of the wait time is network I/O, so
-    threading (not multiprocessing) is the right concurrency model here.
     Keep workers ≤ 8 to stay within MAST's informal rate limits.
 
     Returns a dict mapping status -> count for final reporting.
@@ -268,7 +265,7 @@ def download_lightcurves(kepids: list[int], workers: int = 4) -> dict[str, int]:
     )
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_download_one_star, kid): kid for kid in kepids}
+        futures = {pool.submit(_download_one_kepler_star, kid): kid for kid in kepids}
 
         for i, future in enumerate(as_completed(futures), start=1):
             kepid, status = future.result()
@@ -304,8 +301,8 @@ TESS_CATALOG_URL = (
     + urllib.parse.urlencode({"query": TESS_TAP_QUERY, "format": "csv"})
 )
 
-# TFOPWG dispositions we keep (CP/KP = confirmed, PC = candidate, FP/FA = false positive).
-TESS_VALID_DISPOSITIONS = {"CP", "KP", "PC", "FP", "FA"}
+# TFOPWG dispositions we keep (CP/KP = confirmed, APC/PC = candidate, FP/FA = false positive).
+TESS_VALID_DISPOSITIONS = {"CP", "KP", "APC", "PC", "FP", "FA"}
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +318,7 @@ def download_tess_catalog(force: bool = False) -> pd.DataFrame:
     The catalog is saved with the original NASA column names:
         tid           int     TIC (TESS Input Catalog) star ID
         toi           float   TOI identifier, e.g. 103.01
-        tfopwg_disp   str     TFOPWG disposition: CP, KP, PC, FP, or FA
+        tfopwg_disp   str     TFOPWG disposition: CP, KP, APC, PC, FP, or FA
         pl_orbper     float   Orbital period in days
         pl_tranmid    float   Transit midpoint in BJD (NOT BTJD)
         pl_trandurh   float   Transit duration in hours
@@ -394,7 +391,7 @@ def _download_one_tess_star(tic_id: int, retries: int = 3) -> tuple[int, str]:
     Tries 2-minute SPOC cadence first (highest quality); falls back to
     10-minute TESS-SPOC FFI lightcurves if no short-cadence data exists.
 
-    Returns (tic_id, status) with the same status strings as _download_one_star.
+    Returns (tic_id, status) with the same status strings as _download_one_kepler_star.
     """
     out_path = _tess_fits_path(tic_id)
     if out_path.exists():
@@ -461,8 +458,8 @@ def download_tess_lightcurves(tic_ids: list[int], workers: int = 4) -> dict[str,
     """
     Download TESS lightcurves for every TIC ID in *tic_ids* using a thread pool.
 
-    Identical structure to download_lightcurves() but dispatches
-    _download_one_tess_star.  Kepler and TESS FITS files coexist in data/raw/
+    Identical structure to download_kepler_lightcurves() but dispatches
+    _download_one_tess_starKepler and TESS FITS files coexist in data/raw/
     distinguished by their filename prefix (kic_* vs tic_*).
     """
     RAW_DIR.mkdir(parents=True, exist_ok=True)

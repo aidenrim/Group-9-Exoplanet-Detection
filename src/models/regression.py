@@ -9,10 +9,8 @@ from src.data.preprocess import _clean_and_detrend, SG_WINDOW, SG_WINDOW_TESS
 
 log = logging.getLogger(__name__)
 
-# Transit durations to search over. Using three representative values covers
-# the range from hot Jupiters (~1 h) to long-period giants (~8 h) without
-# blowing up compute time.
-_DURATIONS_DAYS = np.array([0.05, 0.1, 0.2])   # hours: ~1.2, 2.4, 4.8
+# Transit durations to search over.
+_DURATIONS_DAYS = np.array([0.05, 0.1, 0.2])
 
 
 def estimate_period_bls(

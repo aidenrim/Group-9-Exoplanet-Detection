@@ -9,7 +9,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.models.predict import load_model, predict_koi
+from src.models.predict import load_model, predict_single_oi
 from src.models.regression import estimate_period_bls
 
 ROOT        = Path(__file__).resolve().parent
@@ -52,16 +52,16 @@ st.sidebar.caption(
 )
 
 # ---------------------------------------------------------------------------
-# Main — KOI input and classification
+# Main — Object of interest input and classification
 # ---------------------------------------------------------------------------
 
-kepoi_name = st.text_input("KOI / TOI Name", placeholder="e.g. K00010.01  or  TOI-103.01")
+name = st.text_input("KOI / TOI Name", placeholder="e.g. K00010.01  or  TOI-103.01")
 
-if st.button("Run Classification") and kepoi_name.strip():
+if st.button("Run Classification") and name.strip():
     with st.spinner("Running classification..."):
         try:
-            st.session_state["result"]     = predict_koi(model_name, kepoi_name.strip(), threshold=threshold)
-            st.session_state["kepoi_name"] = kepoi_name.strip()
+            st.session_state["result"]     = predict_single_oi(model_name, name.strip(), threshold=threshold)
+            st.session_state["name"] = name.strip()
         except KeyError as exc:
             st.error(str(exc))
             st.stop()
@@ -74,7 +74,7 @@ if st.button("Run Classification") and kepoi_name.strip():
 
 if "result" in st.session_state:
     result     = st.session_state["result"]
-    kepoi_name = st.session_state["kepoi_name"]
+    name = st.session_state["name"]
 
     # --- result banner ----------------------------------------------------
     label = "Planet Predicted" if result["prediction"] == 1 else "Not a Planet Predicted"
@@ -88,7 +88,7 @@ if "result" in st.session_state:
     col3.metric("Threshold",   f"{result['threshold']:.2f}")
 
     # --- known disposition ------------------------------------------------
-    is_tess = kepoi_name.upper().startswith("TOI")
+    is_tess = name.upper().startswith("TOI")
     star_label = "TIC ID" if is_tess else "Kepler ID"
     disp_str = (
         "Planet" if result["disposition"] == "CONFIRMED"
@@ -109,7 +109,7 @@ if "result" in st.session_state:
     ax1.axhline(0, color="gray", linestyle="--", lw=0.5, alpha=0.5)
     ax1.set_xlabel("Orbital phase")
     ax1.set_ylabel("Relative flux (baseline = 0)")
-    ax1.set_title(f"Global view — {kepoi_name}  (201 phase bins)")
+    ax1.set_title(f"Global view — {name}  (201 phase bins)")
     ax1.grid(True, alpha=0.3)
     st.pyplot(fig1)
     plt.close(fig1)
@@ -123,7 +123,7 @@ if "result" in st.session_state:
     ax2.axhline(0, color="gray", linestyle="--", lw=0.5, alpha=0.5)
     ax2.set_xlabel("Phase (transit-centered, ±2 transit durations = ±1)")
     ax2.set_ylabel("Relative flux")
-    ax2.set_title(f"Local view — {kepoi_name}  (61 phase bins, transit window)")
+    ax2.set_title(f"Local view — {name}  (61 phase bins, transit window)")
     ax2.grid(True, alpha=0.3)
     st.pyplot(fig2)
     plt.close(fig2)
@@ -170,7 +170,7 @@ if "result" in st.session_state:
             ax3.set_xscale("log")
             ax3.set_xlabel("Period (days)")
             ax3.set_ylabel("BLS power")
-            ax3.set_title(f"BLS periodogram — {kepoi_name}")
+            ax3.set_title(f"BLS periodogram — {name}")
             ax3.legend(fontsize=8)
             ax3.grid(True, alpha=0.3)
             st.pyplot(fig3)

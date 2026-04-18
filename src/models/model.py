@@ -16,7 +16,7 @@ The two flattened feature vectors are concatenated and passed through a small
 fully-connected classifier.
 
 Global view captures context (noise, secondary eclipses, variability).
-Local view captures transit shape (flat vs V-shaped, symmetry).
+Local view captures transit shape (flat vs U vs V-shaped, symmetry).
 
 """
 
@@ -48,7 +48,7 @@ class ConvBlock(nn.Module):
                 in_channels,
                 out_channels,
                 kernel_size=kernel_size,
-                padding=kernel_size // 2,   # 'same' padding
+                padding=kernel_size // 2,
             ),
             nn.BatchNorm1d(out_channels),
             nn.ReLU(inplace=True),
@@ -75,10 +75,8 @@ class ExoplanetCNN(nn.Module):
              to BCEWithLogitsLoss during training.
 
     Args:
-        global_len:  Length of the global-view input (must match GLOBAL_BINS
-                     in preprocess.py, default 201).
-        local_len:   Length of the local-view input (must match LOCAL_BINS
-                     in preprocess.py, default 61).
+        global_len:  Length of the global-view input
+        local_len:   Length of the local-view input
         dropout:     Dropout probability in the classifier head (default 0.5).
                      Dropout is the primary regularisation mechanism; it
                      randomly zeroes half the activations each forward pass
@@ -100,7 +98,7 @@ class ExoplanetCNN(nn.Module):
         #   After block 1: floor(201 / 2) = 100   (channels: 1  -> 16)
         #   After block 2: floor(100 / 2) =  50   (channels: 16 -> 32)
         #   After block 3: floor( 50 / 2) =  25   (channels: 32 -> 64)
-        #   Flatten: 64 × 25 = 1 600
+        #   Flatten: 64 × 25 = 1600
         self.global_branch = nn.Sequential(
             ConvBlock(1,  16),
             ConvBlock(16, 32),
@@ -118,22 +116,21 @@ class ExoplanetCNN(nn.Module):
             ConvBlock(16, 32),
         )
 
-        # Dynamically compute the flattened sizes.
+        # Compute the flattened sizes.
         with torch.no_grad():
             dummy_g = torch.zeros(1, 1, global_len)
             dummy_l = torch.zeros(1, 1, local_len)
             g_flat = self.global_branch(dummy_g).flatten(1).shape[1]
             l_flat = self.local_branch(dummy_l).flatten(1).shape[1]
 
-        combined_size = g_flat + l_flat   # 1 600 + 480 = 2 080 by default
+        combined_size = g_flat + l_flat   # 1600 + 480 = 2080 by default
 
         # Classifier head
-
         self.head = nn.Sequential(
             nn.Linear(combined_size, 512),
             nn.ReLU(inplace=True),
             nn.Dropout(p=dropout),
-            nn.Linear(512, 1),          # raw logit (no sigmoid)
+            nn.Linear(512, 1),      # raw logit (no sigmoid)
         )
 
     def forward(
@@ -149,16 +146,14 @@ class ExoplanetCNN(nn.Module):
         Returns:
             logits: (batch, 1)
         """
-        # unsqueeze(1) adds the channel dimension: (B, L) -> (B, 1, L)
         g = self.global_branch(global_view.unsqueeze(1))   # (B, 64, 25)
         l = self.local_branch(local_view.unsqueeze(1))     # (B, 32, 15)
 
-        # Flatten spatial dimension: (B, C, L) -> (B, C*L)
         g = g.flatten(1)    # (B, 1 600)
         l = l.flatten(1)    # (B,   480)
 
         combined = torch.cat([g, l], dim=1)   # (B, 2 080)
-        return self.head(combined)             # (B, 1)
+        return self.head(combined)            # (B, 1)
 
     def predict_proba(
         self,

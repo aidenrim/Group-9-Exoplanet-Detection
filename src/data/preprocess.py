@@ -9,31 +9,28 @@ Each Object of Interest produces two 1-D arrays:
 
     Global view (201 points)
         The full phase-folded lightcurve binned uniformly across [-0.5, 0.5].
-        Gives the network overall context — out-of-transit noise floor, any
-        secondary eclipse near phase ±0.5 (a red-flag for eclipsing binaries),
-        and ellipsoidal brightness variations.
+        Gives the network overall context — e.g. out-of-transit noise floor,
+        any secondary eclipse near phase ±0.5
 
     Local view (61 points)
         A zoomed window centred on the transit (phase 0), spanning ±2 transit
-        durations in phase space.  Gives fine morphology — a flat-bottomed
-        U-shape is planetary; a pointed V-shape suggests an eclipsing binary
-        at grazing incidence.
+        durations in phase space. Gives local transit context — a flat-bottomed
+        U-shape is indicative of a likely planetary transit; a pointed V-shape
+        may suggest the opposite
 
-Pipeline per KOI
+Pipeline per Object of Interest
 ----------------
-    1.  Load stitched lightcurve from FITS (written by download.py)
-    2.  Remove NaN cadences (gaps between quarters leave NaN padding)
-    3.  Clip upward flux spikes > 5σ using MAD-based sigma estimate
-        — preserves downward transit dips, removes cosmic-ray hits
-    4.  Detrend with a 301-cadence Savitzky-Golay filter to divide
-        out slow stellar variability
-    5.  Phase-fold on the catalog period and epoch, stacking all
+    1. Load stitched lightcurve from FITS (written by download.py)
+    2. Remove NaN cadences (gaps between quarters leave NaN padding)
+    3. Clip upward flux spikes > 5σ
+    4. Detrend with Savitzky-Golay filter
+    5. Phase-fold on the catalog period and epoch, stacking all
         transits to boost signal-to-noise
-    6.  Bin into global view  (201 bins, range [-0.5,  0.5] in phase)
-    7.  Bin into local  view  ( 61 bins, range [-2T, +2T] in phase,
-        where T = transit_duration_hours / (24 × period_days))
-    8.  Subtract 1.0 so baseline ≈ 0 and transit depth is negative
-    9.  Fill empty bins with 0.0 (out-of-transit baseline assumption)
+    6. Bin into global view  (201 bins, range [-0.5,  0.5] in phase)
+    7. Bin into local  view  (61 bins, range [-2T, +2T] in phase,
+        where T = transit_duration_hours / (24 * period_days))
+    8. Subtract 1.0 so baseline ≈ 0 and transit depth is negative
+    9. Fill empty bins with 0.0 (out-of-transit baseline assumption)
     10. Save as compressed .npz; append a row to manifest.csv
 """
 
@@ -67,27 +64,20 @@ LOCAL_BINS = 61
 
 # The local view spans ± (MULTIPLIER × transit_duration / period) in phase.
 LOCAL_HALF_WIDTH_MULTIPLIER = 2.0
-# Hard bounds so no KOI gets an absurdly narrow or absurdly wide local view.
-MIN_LOCAL_HALF_WIDTH = 0.01   # ≥ 1 % of the period on each side
-MAX_LOCAL_HALF_WIDTH = 0.25   # ≤ 25 % of the period on each side
+# Hard bounds so no object of interest local view becomes too narrow or too wide
+MIN_LOCAL_HALF_WIDTH = 0.01
+MAX_LOCAL_HALF_WIDTH = 0.25 
 
 # Savitzky-Golay window for stellar-variability removal.
 # Long-cadence Kepler = 30-min sampling -> 48 cadences / day.
-# 301 cadences ≈ 6.3 days — wide enough to track typical stellar rotation
-# (> 10 days for most Kepler targets) without distorting the transit shape
-# (longest KOI transit duration ≈ 15 hours ≈ 30 cadences, well inside one bin).
-SG_WINDOW = 301
+# 301 cadences ≈ 6.3 days
+SG_WINDOW_KEPLER = 301
 
 # TESS 2-minute cadence: 720 cadences / day.
-# 4537 cadences ≈ 6.3 days — same physical window as Kepler SG_WINDOW.
-# Must be odd. 4537 = 2 * 2268 + 1.
-# Using the Kepler window (301) on TESS data would span only ~10 hours,
-# which is narrower than many transit durations and would distort the signal.
+# 4537 cadences ≈ 6.3 days
 SG_WINDOW_TESS = 4537
 
 # BTJD conversion: TESS lightcurve times are BTJD = BJD - 2,457,000.
-# The NASA Archive stores pl_tranmid in BJD; we subtract this offset to
-# get BTJD before phase-folding, and store the converted value in the manifest.
 BTJD_OFFSET = 2457000.0
 
 # Mission identifiers written to the manifest.
@@ -104,12 +94,9 @@ _TESS_DISP_MAP: dict[str, str] = {
     "FA": "FALSE POSITIVE",
 }
 
-# Only clip upward outliers.  5σ is aggressive enough to catch cosmic rays
-# while being conservative enough not to clip real astrophysical variability.
 SIGMA_UPPER = 5.0
 
-# Discard lightcurves with fewer than this many cadences after cleaning.
-# 500 cadences ≈ 10 days — the absolute minimum for a meaningful phase fold.
+# 500 cadences ≈ 10 days — minimum for a meaningful phase fold.
 MIN_CADENCES = 500
 
 # Binary classification targets.
@@ -128,7 +115,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _fits_path(kepid: int) -> Path:
+def _kepler_fits_path(kepid: int) -> Path:
     """Path to the raw stitched Kepler lightcurve written by download.py."""
     return RAW_DIR / f"kic_{kepid:09d}.fits"
 
@@ -165,7 +152,7 @@ def _normalize_catalog(catalog: pd.DataFrame, mission: str) -> pd.DataFrame:
         period      float   Orbital period in days
         time0bk     float   Transit epoch in mission-native time:
                               Kepler -> BKJD (unchanged from koi_time0bk)
-                              TESS   -> BTJD = pl_tranmid − 2,457,000
+                              TESS   -> BTJD = pl_tranmid - 2,457,000
         duration    float   Transit duration in hours
 
     Kepler source columns : kepid, kepoi_name, koi_disposition,
@@ -188,7 +175,7 @@ def _normalize_catalog(catalog: pd.DataFrame, mission: str) -> pd.DataFrame:
         df["name"]        = df["toi"].apply(lambda x: f"TOI-{float(x):.2f}")
         df["disposition"] = df["tfopwg_disp"].map(_TESS_DISP_MAP)
         df["period"]      = df["pl_orbper"]
-        df["time0bk"]     = df["pl_tranmid"] - BTJD_OFFSET   # BJD -> BTJD
+        df["time0bk"]     = df["pl_tranmid"] - BTJD_OFFSET 
         df["duration"]    = df["pl_trandurh"]
 
     return df[["id", "name", "disposition", "period", "time0bk", "duration"]].copy()
@@ -199,7 +186,7 @@ def _normalize_catalog(catalog: pd.DataFrame, mission: str) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def _clean_and_detrend(lc: lk.LightCurve, sg_window: int = SG_WINDOW) -> lk.LightCurve | None:
+def _clean_and_detrend(lc: lk.LightCurve, sg_window: int) -> lk.LightCurve | None:
     """
     Prepare a raw stitched lightcurve for phase-folding.
 
@@ -208,7 +195,7 @@ def _clean_and_detrend(lc: lk.LightCurve, sg_window: int = SG_WINDOW) -> lk.Ligh
 
     Outlier clipping
     ----------------
-    We clip cadences whose flux exceeds the median + 5 × MAD-sigma.
+    We clip cadences whose flux exceeds the median + 5 x MAD-sigma.
     MAD (Median Absolute Deviation) is far more robust than standard
     deviation here because:
       • transit dips are often many sigma below the median — using std would
@@ -219,20 +206,13 @@ def _clean_and_detrend(lc: lk.LightCurve, sg_window: int = SG_WINDOW) -> lk.Ligh
     Savitzky-Golay detrending
     -------------------------
     Stars exhibit brightness variations on timescales of days to weeks due to
-    rotation (star spots crossing the disk) and convective granulation.  Left
+    rotation (star spots crossing the disk) and convective granulation. Left
     uncorrected, these slow trends create a sloping or curved baseline in the
     phase-folded lightcurve that the CNN could mistake for a transit signal.
 
     lightkurve's flatten() fits a Savitzky-Golay polynomial filter to the flux
-    and divides it out.  The key constraint is that the filter window must be
-    MUCH wider than the transit duration so the filter does not "see" the
-    transit dip and erroneously absorb it into the trend.
-
-    With SG_WINDOW = 301 cadences ≈ 6.3 days, the widest transit in the KOI
-    catalog (≈15 hours) is ≈30 cadences — only 10 % of the window.  Studies
-    of Kepler data have shown that a 3-day window (144 cadences) already
-    attenuates transits by < 1 % for durations < 12 hours, so 6.3 days gives
-    us comfortable headroom.
+    and divides it out. However, the filter window must be much wider than the
+    transit duration so the filter does not absorb the transit into the trend.
     """
     lc = lc.remove_nans()
 
@@ -243,8 +223,6 @@ def _clean_and_detrend(lc: lk.LightCurve, sg_window: int = SG_WINDOW) -> lk.Ligh
     flux = lc.flux.value
     median = np.median(flux)
     mad = np.median(np.abs(flux - median))
-    # 1.4826 is the consistency factor that converts MAD to an equivalent
-    # standard deviation under the assumption of a normal distribution.
     sigma_est = mad * 1.4826
     upper = median + SIGMA_UPPER * sigma_est
     lc = lc[flux < upper]
@@ -253,25 +231,19 @@ def _clean_and_detrend(lc: lk.LightCurve, sg_window: int = SG_WINDOW) -> lk.Ligh
         return None
 
     # ---- Savitzky-Golay detrending -----------------------------------------
-    # flatten() requires an odd window length.  Reduce if the lightcurve is
-    # shorter than our preferred window (rare but possible for damaged quarters).
     window = sg_window
     if window >= len(lc):
-        # Round down to nearest odd number less than len(lc).
         window = ((len(lc) - 1) // 2) * 2 + 1
 
     if window < 5:
-        # scipy requires window_length ≥ polyorder + 2.  Default polyorder = 2.
         return None
 
-    # niters=3 sigma=3.0: iteratively mask remaining outliers during the
-    # polynomial fit so they don't distort the estimated baseline.
     flat_lc = lc.flatten(window_length=window, niters=3, sigma=3.0)
     return flat_lc
 
 
 # ---------------------------------------------------------------------------
-# Step B: Phase-fold and bin (once per KOI per star)
+# Step B: Phase-fold and bin (once per object of interest per star)
 # ---------------------------------------------------------------------------
 
 
@@ -287,7 +259,7 @@ def _fold_and_bin(
     Args:
         flat_lc:                Detrended lightcurve; baseline ≈ 1.0.
         period:                 Orbital period in days.
-        epoch:                  Transit epoch in BKJD (BJD − 2 454 833.0).
+        epoch:                  Transit epoch in BKJD (BJD - 2454833.0).
                                 Kepler lightcurve times are also in BKJD,
                                 so no unit conversion is needed.
         transit_duration_hours: Transit duration in hours, used to set the
@@ -357,7 +329,7 @@ def _process_star(
     star_id: int,
     group: pd.DataFrame,
     force: bool,
-    mission: str = MISSION_KEPLER,
+    mission: str,
 ) -> tuple[list[dict], dict[str, int]]:
     """
     Load, clean, and process all candidates for a single host star.
@@ -380,8 +352,8 @@ def _process_star(
     results: list[dict] = []
 
     # Select mission-specific helpers.
-    fits_path_fn = _tess_fits_path if mission == MISSION_TESS else _fits_path
-    sg_window    = SG_WINDOW_TESS  if mission == MISSION_TESS else SG_WINDOW
+    fits_path_fn = _tess_fits_path if mission == MISSION_TESS else _kepler_fits_path
+    sg_window    = SG_WINDOW_TESS  if mission == MISSION_TESS else SG_WINDOW_KEPLER
 
     # ------------------------------------------------------------------
     # Filter candidates that are already processed (unless --force).
@@ -479,8 +451,7 @@ def run_preprocessing(
     Iterate over every star in *catalog*, process its candidates, and write output.
 
     Args:
-        catalog: Raw catalog DataFrame (Kepler or TESS — columns are normalized
-                 internally via _normalize_catalog).
+        catalog: Raw catalog DataFrame (Kepler or TESS).
         max_stars: If set, only process the first N unique stars.
         force:   If True, reprocess candidates whose .npz already exists.
         mission: MISSION_KEPLER or MISSION_TESS.
@@ -516,14 +487,11 @@ def run_preprocessing(
 
         for r in results:
             if r.get("global_view") is None:
-                # Cached candidates are counted in ok but have no arrays to save.
                 continue
 
             out_path = _npz_path(r["name"])
 
-            # Save global_view (201,) and local_view (61,) as a compressed
-            # numpy archive.  Compression is ~5× smaller than uncompressed
-            # with negligible load-time overhead for arrays this small.
+            # Save global_view (201,) and local_view (61,) as .npz
             np.savez_compressed(
                 out_path,
                 global_view=r["global_view"],

@@ -6,9 +6,6 @@ Reads data/datasets/manifest.csv (written by scripts/preprocess.py), performs
 a star-stratified split into train / val / test partitions, and saves the
 resulting DataFrames as CSV files in data/datasets/{name}/.
 
-The split is done BY STAR (id column) to prevent data leakage from multi-planet
-systems sharing the same underlying lightcurve.
-
 Use --mission to restrict splits to one mission:
     --mission kepler   Kepler KOIs only
     --mission tess     TESS TOIs only
@@ -18,10 +15,6 @@ Output files:
     data/datasets/{name}/train.csv
     data/datasets/{name}/val.csv
     data/datasets/{name}/test.csv
-
-These files are loaded by scripts/train.py — run this script once before
-training, or any time you want to rebuild the splits with different fractions
-or a different random seed.
 
 Usage:
     python scripts/build_dataset.py --name full_dataset
@@ -122,7 +115,7 @@ def main() -> None:
         log.info(f"  Filtered to {target}: {len(manifest)} rows")
 
     # Migrate old manifests where CANDIDATEs still carry label=1 (written before
-    # the -1 change).  Detection uses the disposition column which is always present.
+    # the -1 change).
     if "disposition" in manifest.columns:
         old_candidates = (manifest["disposition"] == "CANDIDATE") & (manifest["label"] == 1)
         if old_candidates.any():

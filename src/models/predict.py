@@ -2,12 +2,12 @@
 Prediction library
 ==================
 
-Single-KOI inference for the ExoplanetCNN.
+Single object of interest inference for the ExoplanetCNN.
 
 Functions
 ---------
 load_model(checkpoint_path)              -> (ExoplanetCNN, metadata_dict)
-predict_koi(model_name, kepoi_name, ...) -> result_dict
+predict_single_oi(model_name, oi_name, ...) -> result_dict
 """
 
 from pathlib import Path
@@ -49,17 +49,17 @@ def load_model(checkpoint_path: Path) -> tuple[ExoplanetCNN, dict]:
     return model, metadata
 
 
-def predict_koi(
+def predict_single_oi(
     model_name: str,
-    kepoi_name: str,
+    oi_name: str,
     threshold: float | None = None,
 ) -> dict:
     """
-    Run inference for a single KOI.
+    Run inference for a single object of interest.
 
     Args:
         model_name: Directory name under results/ (e.g. "run_v1").
-        kepoi_name: KOI identifier from the manifest (e.g. "K00010.01").
+        oi_name: identifier from the manifest (e.g. "K00010.01").
         threshold:  Decision threshold in [0, 1].  If None, the value saved
                     in the checkpoint is used (F1-optimal on the val set), or
                     0.5 if the checkpoint pre-dates threshold saving.
@@ -71,16 +71,16 @@ def predict_koi(
         confidence      float       prob if PLANET; (1 - prob) if FALSE POSITIVE
         epoch           int | str   checkpoint epoch
         val_auc         float       best val AUC from training
-        kepoi_name      str
-        kepid           int
-        koi_disposition str         "CONFIRMED", "CANDIDATE", or "FALSE POSITIVE"
+        name            str
+        id              int
+        disposition     str         "CONFIRMED", "CANDIDATE", or "FALSE POSITIVE"
         known_label     int         0 or 1 from manifest
         global_view     np.ndarray  shape (201,) — phase-folded full view
         local_view      np.ndarray  shape  (61,) — zoomed transit window
 
     Raises:
         FileNotFoundError: if the checkpoint or .npz data file is missing.
-        KeyError:          if kepoi_name is not in the manifest.
+        KeyError:          if oi_name is not in the manifest.
     """
     checkpoint_path = ROOT / "results" / model_name / "best_model.pt"
     if not checkpoint_path.exists():
@@ -96,10 +96,10 @@ def predict_koi(
 
     # --- look up candidate in manifest ------------------------------------
     manifest = pd.read_csv(MANIFEST_FILE)
-    matches = manifest[manifest["name"] == kepoi_name]
+    matches = manifest[manifest["name"] == oi_name]
     if matches.empty:
         raise KeyError(
-            f"Candidate '{kepoi_name}' not found in manifest.\n"
+            f"Candidate '{oi_name}' not found in manifest.\n"
             f"Example names: {manifest['name'].sample(min(5, len(manifest))).tolist()}"
         )
     row = matches.iloc[0]
@@ -132,7 +132,7 @@ def predict_koi(
         "confidence":   confidence,
         "epoch":        meta["epoch"],
         "val_auc":      meta["val_auc"],
-        "name":         kepoi_name,
+        "name":         oi_name,
         "id":           int(row["id"]),
         "disposition":  str(row["disposition"]),
         "known_label":  int(row["label"]),

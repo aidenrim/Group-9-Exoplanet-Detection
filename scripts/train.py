@@ -2,9 +2,8 @@
 """
 Train the ExoplanetCNN model.
 
-Trains the dual-branch 1D CNN on preprocessed KOI lightcurve arrays.
-Requires pre-built train/val/test splits in data/datasets/ — run
-scripts/build_dataset.py first if they don't exist.
+Trains the CNN on preprocessed lightcurve arrays.
+Requires pre-built train/val/test splits in data/datasets/
 
 Training loop summary:
   • Loss      : BCEWithLogitsLoss with pos_weight
@@ -23,8 +22,8 @@ Usage:
     # Standard training run
     python scripts/train.py --name run_v1 --dataset full_dataset
 
-    # Quick smoke-test (5 epochs)
-    python scripts/train.py --name smoke --dataset full_dataset --epochs 5 --batch-size 64
+    # Quick test
+    python scripts/train.py --name test --dataset full_dataset --epochs 5 --batch-size 64
 
     # Adjust hyperparameters
     python scripts/train.py --name run_v2 --dataset full_dataset --lr 5e-4 --dropout 0.3

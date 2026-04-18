@@ -9,7 +9,7 @@ The split is done by star (id), not by individual KOIs or TOIs. Two planet
 candidates on the same star were extracted from the same underlying
 lightcurve, so their global-view arrays share the same noise floor, the
 same stellar-variability residuals, and the same inter-quarter normalisation
-artefacts.  Splitting by KOI/TOI could allow the model to see the exact patterns at
+artefacts. Splitting by KOI/TOI could allow the model to see the exact patterns at
 both training and test times, which would improve performance on the test set but
 negatively affect generalization.
 """
@@ -35,23 +35,20 @@ TEST_FILE     = DATASETS_DIR / "test.csv"
 # ---------------------------------------------------------------------------
 
 
-class KOIDataset(Dataset):
+class ExoplanetDataset(Dataset):
     """
     Loads (global_view, local_view, label) triplets from preprocessed .npz files.
 
-    Each item corresponds to one Object of Interest.  The arrays
+    Each item corresponds to one Object of Interest. The arrays
     were written by preprocess.py and have fixed shapes:
 
         global_view : float32 (201,)   full phase-folded, baseline-centred
         local_view  : float32  (61,)   zoomed transit window
         label       : float32  scalar  read from the manifest (1 = planet,
-                                       0 = false positive; -1 values should
-                                       not appear here — remap or drop them
-                                       in build_dataset.py before constructing
-                                       this dataset)
+                                       0 = false positive; -1 = candidate)
 
-    The label is float32 rather than int so it matches the shape expected by
-    BCEWithLogitsLoss without an explicit cast in the training loop.
+    The label is float32 to match the shape expected by
+    BCEWithLogitsLoss without casting in the training loop.
     """
 
     def __init__(self, manifest: pd.DataFrame) -> None:
@@ -59,9 +56,6 @@ class KOIDataset(Dataset):
         Args:
             manifest: DataFrame slice with at minimum columns
                       [name, id, label, path].
-                      Pass in the train, val, or test sub-DataFrame from
-                      make_splits() or load_splits(); do not pass the full
-                      manifest here.
         """
         self.manifest = manifest.reset_index(drop=True)
 
@@ -100,12 +94,12 @@ class KOIDataset(Dataset):
 # ---------------------------------------------------------------------------
 
 
-def make_weighted_sampler(dataset: KOIDataset) -> WeightedRandomSampler:
+def make_weighted_sampler(dataset: ExoplanetDataset) -> WeightedRandomSampler:
     """
     Build a WeightedRandomSampler that draws balanced batches.
 
     Each sample is assigned a weight inversely proportional to its class
-    frequency, so on average each batch will contain equal numbers of planets
+    frequency. On average each batch will contain equal numbers of planets
     and false positives regardless of the true class ratio.
 
     Alternative to passing pos_weight to BCEWithLogitsLoss.
@@ -143,10 +137,10 @@ def make_splits(
 
     Strategy
     --------
-    1.  Compute a star-level label: 1 if the star has at least one instance of
+    1. Compute a star-level label: 1 if the star has at least one instance of
         the positive class, 0 if all its candidates are known false positives.
-    2.  Stratified-split those star IDs 70 / 15 / 15 (default).
-    3.  Assign every candidate to whichever split its host star ended up in.
+    2. Stratified-split those star IDs 70 / 15 / 15 (or passed fracs).
+    3. Assign every candidate to whichever split its host star ended up in.
 
     Args:
         manifest_path:  Path to manifest.csv written by preprocess.py.
@@ -158,7 +152,7 @@ def make_splits(
         random_state:   Seed for reproducibility.
 
     Returns:
-        (train_df, val_df, test_df) — DataFrames ready to pass into KOIDataset.
+        (train_df, val_df, test_df) — DataFrames ready to pass into ExoplanetDataset.
     """
     manifest = manifest_df if manifest_df is not None else pd.read_csv(manifest_path)
 
@@ -167,7 +161,7 @@ def make_splits(
     stars   = star_labels.index.to_numpy()
     slabels = star_labels.to_numpy()
 
-    # --- Split 1: carve out the test set ----------------------------------
+    # --- Split 1: make the test set ----------------------------------
     train_val_stars, test_stars = train_test_split(
         stars,
         test_size=test_frac,
@@ -176,7 +170,7 @@ def make_splits(
     )
     train_val_labels = star_labels.loc[train_val_stars].to_numpy()
 
-    # --- Split 2: carve out the validation set from the remainder ---------
+    # --- Split 2: make the validation set from the remainder ---------
     val_frac_adj = val_frac / (1.0 - test_frac)
     train_stars, val_stars = train_test_split(
         train_val_stars,
@@ -221,7 +215,7 @@ def load_splits(
 
     Args:
         datasets_dir: Path to the named dataset directory, e.g.
-                      data/datasets/full_dataset/.  Must contain
+                      data/datasets/full_dataset/. Must contain
                       train.csv, val.csv, and test.csv.
 
     Raises FileNotFoundError if any of the split CSVs do not exist
@@ -266,9 +260,9 @@ def make_loaders(
     Returns:
         (train_loader, val_loader, test_loader)
     """
-    train_ds = KOIDataset(train_df)
-    val_ds   = KOIDataset(val_df)
-    test_ds  = KOIDataset(test_df)
+    train_ds = ExoplanetDataset(train_df)
+    val_ds   = ExoplanetDataset(val_df)
+    test_ds  = ExoplanetDataset(test_df)
 
     if use_weighted_sampler:
         sampler = make_weighted_sampler(train_ds)

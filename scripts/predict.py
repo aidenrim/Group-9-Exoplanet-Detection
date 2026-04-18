@@ -2,7 +2,7 @@
 """
 Classify a single KOI candidate using a trained ExoplanetCNN.
 
-Looks up the candidate by kepoi_name in data/datasets/manifest.csv,
+Looks up the candidate by name in data/datasets/manifest.csv,
 loads its preprocessed .npz arrays, and runs the model forward pass
 on CPU to produce a planet probability and classification.
 

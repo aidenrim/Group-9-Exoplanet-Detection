@@ -2,13 +2,13 @@
 Training library
 ================
 
-Trains the dual-branch ExoplanetCNN on preprocessed KOI lightcurve arrays,
+Trains the dual-branch ExoplanetCNN on preprocessed lightcurve arrays,
 validates after every epoch, checkpoints the best model, and produces a full
 evaluation report on the held-out test set.
 
 Training loop summary
 ---------------------
-  • Loss      : BCEWithLogitsLoss with pos_weight (handles mild class imbalance)
+  • Loss      : BCEWithLogitsLoss with pos_weight (handles class imbalance)
   • Optimiser : Adam with L2 weight decay
   • Scheduler : ReduceLROnPlateau — halves the LR when val AUC stops improving
   • Stopping  : EarlyStopping on val AUC with configurable patience
@@ -16,8 +16,8 @@ Training loop summary
 
 Test-set evaluation (after training completes)
 ----------------------------------------------
-  • AUC-ROC  — primary metric; threshold-independent ranking quality
-  • Precision, Recall, F1  — at the threshold that maximises val-set F1
+  • AUC-ROC  — primary metric
+  • Precision, Recall, F1
   • Confusion matrix
   • Training-curve plot  (loss + AUC vs epoch)
   • ROC curve plot
@@ -25,11 +25,10 @@ Test-set evaluation (after training completes)
 """
 
 import logging
-import sys
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")          # headless backend — safe on any machine
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -44,11 +43,7 @@ from sklearn.metrics import (
 )
 from tqdm import tqdm
 
-# ---------------------------------------------------------------------------
-# Sibling module imports
-# ---------------------------------------------------------------------------
-# Scripts add the project root to sys.path before importing this module,
-# so absolute src.* imports resolve correctly.
+
 
 from src.data.dataset import load_splits, make_loaders
 from src.models.model import ExoplanetCNN
@@ -67,7 +62,6 @@ log = logging.getLogger(__name__)
 
 
 def get_device() -> torch.device:
-    """Pick the best available device: CUDA > Apple MPS > CPU."""
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -103,15 +97,12 @@ def train_epoch(
         local_view  = local_view.to(device, non_blocking=True)
         labels      = labels.to(device, non_blocking=True)
 
-        optimiser.zero_grad(set_to_none=True)   # slightly faster than zero_grad()
+        optimiser.zero_grad(set_to_none=True)
 
         logits = model(global_view, local_view).squeeze(1)   # (B,)
         loss   = criterion(logits, labels)
 
         loss.backward()
-        # Clamp gradients to prevent weights from growing large enough to
-        # produce extreme logits, which cause non-finite sigmoid outputs on
-        # the MPS backend.
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimiser.step()
 
@@ -143,17 +134,6 @@ def evaluate(
         labels   ndarray ground-truth labels
         probs    ndarray predicted probabilities in [0, 1]
     """
-    # Run evaluation on CPU regardless of training device.
-    #
-    # The MPS backend has numerical instability during inference: BCEWithLogitsLoss
-    # produces NaN/±inf, and sigmoid can overflow to NaN for large-but-finite
-    # logits.  These corrupt val loss, val AUC, and therefore checkpoint selection,
-    # LR scheduling, and early stopping — all the signals that guide training.
-    # Symptom-level fixes (clamping, NaN sanitisation) don't reach the root cause.
-    #
-    # CPU arithmetic is always numerically stable.  Moving the model costs ~0.3 s
-    # per eval call; on a 4-second epoch that's <10 % overhead and is worth it for
-    # reliable, deterministic metrics.
     eval_device = torch.device("cpu") if device.type == "mps" else device
     model.to(eval_device)
     model.eval()
@@ -185,15 +165,9 @@ def evaluate(
     labels_arr = np.concatenate(all_labels)
     probs_arr  = np.concatenate(all_probs)
 
-    # Safety net: should never trigger on CPU, but keeps the pipeline robust.
     probs_arr = np.where(np.isfinite(probs_arr), probs_arr, 0.5)
 
     # Convert float32 labels (0.0 / 1.0) to binary int.
-    # We use np.where rather than astype(int) because the MPS backend can produce
-    # signaling-NaN bit patterns that np.isnan() misses and nan_to_num doesn't
-    # catch; those survive to astype(int) and overflow to INT64_MIN (-2^63).
-    # A boolean comparison is safe for *any* NaN variant: IEEE 754 guarantees
-    # that NaN comparisons always return False, so NaN -> 0 with no cast involved.
     labels_int = np.where(labels_arr >= 0.5, 1, 0)
     try:
         auc = roc_auc_score(labels_int, probs_arr)
@@ -221,8 +195,7 @@ def find_best_threshold(labels: np.ndarray, probs: np.ndarray) -> tuple[float, f
 
     We scan 89 candidate thresholds in [0.1, 0.9] and return the one that
     gives the highest F1.  This is done on the *validation* set, then the
-    chosen threshold is applied to the test set — never tune the threshold
-    on the test set itself.
+    chosen threshold is applied to the test set
 
     Returns:
         (best_threshold, best_f1)
@@ -381,7 +354,6 @@ def train(
     log.info(f"Loading train/val/test splits from {dataset_dir} ...")
     train_df, val_df, test_df = load_splits(datasets_dir=dataset_dir)
 
-    # pin_memory is a CUDA-only optimisation; MPS and CPU don't support it.
     pin_memory = device.type == "cuda"
     train_loader, val_loader, test_loader = make_loaders(
         train_df, val_df, test_df,
@@ -524,9 +496,7 @@ def train(
         f"Optimal threshold (from val set): {best_thresh:.2f}  "
         f"(val F1 = {val_f1:.4f})"
     )
-
-    # Persist the threshold into the checkpoint so scripts/predict.py can
-    # load it without re-running the full validation set.
+    
     ckpt["threshold"] = best_thresh
     torch.save(ckpt, checkpoint_path)
 

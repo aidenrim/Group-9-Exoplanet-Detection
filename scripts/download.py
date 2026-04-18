@@ -25,7 +25,7 @@ Usage:
     # Both missions
     python scripts/download.py --mission both
 
-    # Smoke-test: first 20 stars per mission
+    #First 20 stars per mission
     python scripts/download.py --mission both --max-stars 20
 
     # Force a fresh catalog fetch
@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data.download import (
     ROOT, RAW_DIR,
-    download_catalog, download_lightcurves,
+    download_kepler_catalog, download_kepler_lightcurves,
     download_tess_catalog, download_tess_lightcurves,
 )
 
@@ -72,7 +72,7 @@ def main() -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Only download the first N unique stars per mission (smoke-testing).",
+        help="Only download the first N unique stars per mission.",
     )
     parser.add_argument(
         "--workers",
@@ -101,12 +101,12 @@ def main() -> None:
     # Kepler
     # ------------------------------------------------------------------
     if do_kepler:
-        df_koi = download_catalog(force=args.force_catalog)
+        df_koi = download_kepler_catalog(force=args.force_catalog)
         kepids: list[int] = df_koi["kepid"].dropna().astype(int).unique().tolist()
         if args.max_stars is not None:
             kepids = kepids[:args.max_stars]
             log.info(f"--max-stars {args.max_stars}: limiting Kepler to {len(kepids)} stars.")
-        summary_k = download_lightcurves(kepids, workers=args.workers)
+        summary_k = download_kepler_lightcurves(kepids, workers=args.workers)
         fits_k = sum(1 for _ in RAW_DIR.glob("kic_*.fits"))
         log.info("=" * 60)
         log.info("Kepler download complete.")

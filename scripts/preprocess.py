@@ -6,15 +6,13 @@ Converts raw stitched lightcurves (from scripts/download.py) into fixed-length,
 normalized arrays ready for CNN input.  Each candidate produces:
 
     Global view  (201 points) — full phase-folded lightcurve
-    Local view   ( 61 points) — zoomed transit window
+    Local view   (61 points) — zoomed transit window
 
 Pipeline per candidate:
     1. Load stitched FITS lightcurve
     2. Remove NaN cadences
     3. Clip upward flux spikes > 5σ (MAD-based)
-    4. Detrend with Savitzky-Golay filter (~6.3 days):
-         Kepler: 301 cadences  (30-min sampling)
-         TESS:   4537 cadences (2-min sampling)
+    4. Detrend with Savitzky-Golay filter
     5. Phase-fold on (period, epoch) from catalog
     6. Bin into global (201) and local (61) views
     7. Subtract 1.0 -> baseline = 0; fill empty bins with 0.0
@@ -24,7 +22,7 @@ Usage:
     python scripts/preprocess.py                       # Kepler (default)
     python scripts/preprocess.py --mission tess        # TESS only
     python scripts/preprocess.py --mission both        # both missions
-    python scripts/preprocess.py --max-stars 50        # smoke-test on 50 stars
+    python scripts/preprocess.py --max-stars 50        # Only process first 50 stars
     python scripts/preprocess.py --force               # reprocess already-done
 """
 
@@ -67,7 +65,7 @@ def main() -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Process only the first N unique stars per mission (smoke-testing).",
+        help="Process only the first N unique stars per mission.",
     )
     parser.add_argument(
         "--force",
