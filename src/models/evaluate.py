@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score, accuracy_score
 import seaborn as sns
 from pathlib import Path
 
@@ -30,16 +30,13 @@ def evaluate_model(model, dataloader, model_name="default"):
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
 
-    # -------------------------
     # Metrics
-    # -------------------------
     precision = precision_score(all_labels, all_preds)
     recall = recall_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds)
+    accuracy = accuracy_score(all_labels, all_preds)
 
-    # -------------------------
     # Confusion Matrix
-    # -------------------------
     cm = confusion_matrix(all_labels, all_preds)
 
     plt.figure(figsize=(5, 4))
@@ -51,6 +48,7 @@ def evaluate_model(model, dataloader, model_name="default"):
     plt.close()
 
     return {
+        "accuracy": float(accuracy),
         "precision": float(precision),
         "recall": float(recall),
         "f1_score": float(f1)

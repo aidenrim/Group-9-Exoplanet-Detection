@@ -23,6 +23,13 @@ if __name__ == "__main__":
         help="Name of the model to save"
     )
 
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=30,
+        help="Number of training epochs (default: 30)"
+    )
+
     args = parser.parse_args()
 
-    train(args.dataset_name, args.model_name)
+    train(args.dataset_name, args.model_name, epochs=args.epochs)

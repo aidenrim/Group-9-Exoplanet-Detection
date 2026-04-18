@@ -59,7 +59,18 @@ def segment_lightcurve(time, flux, window_size=1024, stride=512):
 
 
 
-def preprocess_lightcurve(lc, window_size=1024, stride=512):
+def phase_fold(time, flux, period):
+    """
+    Phase-fold a light curve on a given period.
+
+    Returns (phase, folded_flux) sorted by phase in [0, 1).
+    """
+    phase = (time % period) / period
+    sort_idx = np.argsort(phase)
+    return phase[sort_idx], flux[sort_idx]
+
+
+def preprocess_lightcurve(lc, window_size=1024, stride=512, fold_period=None):
     """
     Full preprocessing pipeline for a LightCurve object.
     """
@@ -81,7 +92,11 @@ def preprocess_lightcurve(lc, window_size=1024, stride=512):
     # Step 3: Normalize
     flux = normalize_flux(flux)
 
-    # Step 4: Segment
+    # Step 4 (optional): Phase-fold on known/candidate period
+    if fold_period is not None:
+        _, flux = phase_fold(time, flux, fold_period)
+
+    # Step 5: Segment
     segments = segment_lightcurve(time, flux, window_size, stride)
 
     return segments
