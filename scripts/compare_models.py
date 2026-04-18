@@ -1,10 +1,6 @@
-#!/usr/bin/env python3
 """
 Plot a grouped bar chart comparing models across precision, accuracy, F1,
 and AUC-ROC.
-
-The x-axis has one group per metric; within each group there is one bar per
-model, so it is easy to see which model wins on each individual metric.
 
 Reads results/{model}/eval.json (written by scripts/evaluate.py) for each
 specified model and saves the chart to results/comparison.png.
@@ -60,7 +56,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if len(args.models) > len(MODEL_COLORS):
-        log.error(f"At most {len(MODEL_COLORS)} models are supported.")
+        log.error(f"At most {len(MODEL_COLORS)} models are currently supported.")
         sys.exit(1)
 
     # ------------------------------------------------------------------

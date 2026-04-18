@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Evaluate a trained ExoplanetCNN on the test split of a named dataset.
 
@@ -37,7 +36,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-from src.data.dataset import DATASETS_DIR, KOIDataset, load_splits
+from src.data.dataset import DATASETS_DIR, ExoplanetDataset, load_splits
 from src.models.model import ExoplanetCNN
 from src.models.train import evaluate, find_best_threshold
 
@@ -107,13 +106,13 @@ def main() -> None:
     # 3. Build DataLoaders (test + val for threshold recovery)
     # ------------------------------------------------------------------
     val_loader  = torch.utils.data.DataLoader(
-        KOIDataset(val_df),
+        ExoplanetDataset(val_df),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0,
     )
     test_loader = torch.utils.data.DataLoader(
-        KOIDataset(test_df),
+        ExoplanetDataset(test_df),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0,
