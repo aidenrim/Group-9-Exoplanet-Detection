@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Preprocess Kepler and/or TESS lightcurves into CNN-ready arrays.
 

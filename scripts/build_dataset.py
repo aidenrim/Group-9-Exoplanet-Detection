@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Build and save train / val / test dataset splits.
 
